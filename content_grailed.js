@@ -7,7 +7,7 @@
 
     const activeItem = (state.inventory || []).find((item) => item.id === job.itemId);
     if (!activeItem) {
-      clearJobMutex();
+      SECOND_SKIN.clearJobMutex();
       return;
     }
 
@@ -17,62 +17,67 @@
   });
 })();
 
-function processGrailedForm(item) {
-  // Human-like randomized delay to reduce anti-bot signals
-  const delay = Math.floor(Math.random() * 1500) + 1500;
+async function processGrailedForm(item) {
+  await SECOND_SKIN.humanDelay(1500, 1500);
 
-  setTimeout(() => {
-    // Grailed splits the listing flow across title, price, category, subcategory, designer.
-    // This MVP injects the simplest text fields; multi-step menus require per-DOM selectors.
-    const titleInjected = dispatchSyntheticInput('input[name="title"]', item.title);
-    const priceInjected = dispatchSyntheticInput('input[name="price"]', item.price);
-    const descriptionInjected = dispatchSyntheticInput('textarea[name="description"]', item.description);
+  const titleEl = await SECOND_SKIN.waitFor('input[name="title"]');
+  const priceEl = await SECOND_SKIN.waitFor('input[name="price"]');
+  const descriptionEl = await SECOND_SKIN.waitFor('textarea[name="description"]');
 
-    if (titleInjected && priceInjected && descriptionInjected) {
-      updatePlatformMeta(item.id, "grailed", "active");
-      clearJobMutex();
-      console.log("[Second Skin] Grailed form fields injected for", item.id);
+  const titleInjected = SECOND_SKIN.dispatchSyntheticInput(titleEl, item.title);
+  const priceInjected = SECOND_SKIN.dispatchSyntheticInput(priceEl, item.price);
+  const descriptionInjected = SECOND_SKIN.dispatchSyntheticInput(descriptionEl, item.description);
+
+  let imagesInjected = false;
+  if (item.images && item.images.length > 0) {
+    const fileInput = await SECOND_SKIN.waitFor('input[type="file"]', 3000);
+    if (fileInput) {
+      imagesInjected = await SECOND_SKIN.injectFiles(fileInput, item.images);
     } else {
-      console.warn("[Second Skin] Grailed selectors not found — partial or no injection.");
+      console.warn("[Second Skin] Grailed file input not found — images skipped.");
     }
-  }, delay);
+  }
+
+  await chainCategoryAndDesigner();
+
+  if (titleInjected && priceInjected && descriptionInjected) {
+    await SECOND_SKIN.updatePlatformMeta(item.id, "grailed", "active");
+    SECOND_SKIN.clearJobMutex();
+    console.log("[Second Skin] Grailed form fields injected for", item.id);
+    if (imagesInjected) console.log("[Second Skin] Grailed images injected for", item.id);
+  } else {
+    console.warn("[Second Skin] Grailed selectors not found — partial or no injection.");
+  }
 }
 
-function dispatchSyntheticInput(selector, value) {
-  const element = document.querySelector(selector);
-  if (!element) return false;
+async function chainCategoryAndDesigner() {
+  // Grailed requires selecting Category → Subcategory → Designer in sequence.
+  // These selectors are platform-specific and should be refined against the live DOM.
 
-  element.value = value;
+  const categoryEl = await SECOND_SKIN.waitFor('[data-testid="category-trigger"], button[aria-label*="Category"]', 3000);
+  if (categoryEl) {
+    categoryEl.click();
+    await SECOND_SKIN.humanDelay(300, 400);
 
-  // Triple-event burst for React/Vue state hooks
-  element.dispatchEvent(new Event("focus", { bubbles: true }));
-  element.dispatchEvent(new Event("input", { bubbles: true }));
-  element.dispatchEvent(new Event("change", { bubbles: true }));
-  element.dispatchEvent(new Event("blur", { bubbles: true }));
+    const firstCategory = await SECOND_SKIN.waitFor('[data-testid="category-option"]:first-child, [role="option"]:first-child', 3000);
+    if (firstCategory) {
+      firstCategory.click();
+      await SECOND_SKIN.humanDelay(300, 400);
+    }
+  }
 
-  return true;
+  const designerEl = await SECOND_SKIN.waitFor('[data-testid="designer-trigger"], input[placeholder*="designer" i]', 3000);
+  if (designerEl) {
+    if (designerEl.tagName === "INPUT") {
+      SECOND_SKIN.dispatchSyntheticInput(designerEl, "Vintage");
+      await SECOND_SKIN.humanDelay(400, 600);
+      const firstDesigner = await SECOND_SKIN.waitFor('[role="option"]:first-child', 2000);
+      if (firstDesigner) firstDesigner.click();
+    } else {
+      designerEl.click();
+      await SECOND_SKIN.humanDelay(300, 400);
+      const firstDesigner = await SECOND_SKIN.waitFor('[data-testid="designer-option"]:first-child, [role="option"]:first-child', 3000);
+      if (firstDesigner) firstDesigner.click();
+    }
+  }
 }
-
-function updatePlatformMeta(itemId, site, status) {
-  chrome.storage.local.get(["inventory"], (result) => {
-    const inventory = result.inventory || [];
-    const item = inventory.find((i) => i.id === itemId);
-    if (!item) return;
-
-    item.platforms[site] = {
-      ...item.platforms[site],
-      status,
-      lastChecked: new Date().toISOString()
-    };
-
-    chrome.storage.local.set({ inventory });
-  });
-}
-
-function clearJobMutex() {
-  chrome.storage.local.set({ currentListingJob: null });
-}
-
-// TODO: chained multi-step selector helper for Grailed category/designer menus.
-// Example shape:
-// async function clickWhenPresent(selector, timeout = 5000) { ... }

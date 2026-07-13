@@ -1,0 +1,12 @@
+{
+  "name": "second-skin-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ad-hoc tests for Second Skin extension logic",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

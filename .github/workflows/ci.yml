@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check JS syntax
+        run: |
+          node --check dashboard.js
+          node --check content_depop.js
+          node --check content_grailed.js
+          node --check background.js
+          node --check shared.js
+
+      - name: Validate manifest.json
+        run: node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest.json valid');"
+
+      - name: Run shared.js tests
+        working-directory: ./test
+        run: |
+          npm install
+          npm test

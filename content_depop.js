@@ -7,7 +7,7 @@
 
     const activeItem = (state.inventory || []).find((item) => item.id === job.itemId);
     if (!activeItem) {
-      clearJobMutex();
+      SECOND_SKIN.clearJobMutex();
       return;
     }
 
@@ -17,67 +17,40 @@
   });
 })();
 
-function processDepopForm(item) {
-  // Graceful initialization window for framework DOM rendering
-  const delay = Math.floor(Math.random() * 1500) + 1500;
+async function processDepopForm(item) {
+  await SECOND_SKIN.humanDelay(1500, 1500);
 
-  setTimeout(() => {
-    // Depop's description textarea appears to combine title + body in practice.
-    const unifiedBody = `${item.title}\n\n${item.description}`;
+  const unifiedBody = `${item.title}\n\n${item.description}`;
 
-    const descriptionInjected = dispatchSyntheticInput('textarea[name="description"]', unifiedBody);
-    const priceInjected = dispatchSyntheticInput('input[name="price"]', item.price);
+  const descriptionEl = await SECOND_SKIN.waitFor('textarea[name="description"]');
+  const priceEl = await SECOND_SKIN.waitFor('input[name="price"]');
 
-    if (descriptionInjected && priceInjected) {
-      updatePlatformMeta(item.id, "depop", "active");
-      clearJobMutex();
-      console.log("[Second Skin] Depop form fields injected for", item.id);
+  const descriptionInjected = SECOND_SKIN.dispatchSyntheticInput(descriptionEl, unifiedBody);
+  const priceInjected = SECOND_SKIN.dispatchSyntheticInput(priceEl, item.price);
+
+  let imagesInjected = false;
+  if (item.images && item.images.length > 0) {
+    const fileInput = await SECOND_SKIN.waitFor('input[type="file"]', 3000);
+    if (fileInput) {
+      imagesInjected = await SECOND_SKIN.injectFiles(fileInput, item.images);
     } else {
-      console.warn("[Second Skin] Depop selectors not found — partial or no injection.");
+      console.warn("[Second Skin] Depop file input not found — images skipped.");
     }
-  }, delay);
-}
+  }
 
-function dispatchSyntheticInput(selector, value) {
-  const element = document.querySelector(selector);
-  if (!element) return false;
-
-  // 1. Native value mutation
-  element.value = value;
-
-  // 2. Triple-event burst to satisfy React/Next.js state hooks
-  element.dispatchEvent(new Event("focus", { bubbles: true }));
-  element.dispatchEvent(new Event("input", { bubbles: true }));
-  element.dispatchEvent(new Event("change", { bubbles: true }));
-  element.dispatchEvent(new Event("blur", { bubbles: true }));
-
-  return true;
-}
-
-function updatePlatformMeta(itemId, site, status) {
-  chrome.storage.local.get(["inventory"], (result) => {
-    const inventory = result.inventory || [];
-    const item = inventory.find((i) => i.id === itemId);
-    if (!item) return;
-
-    item.platforms[site] = {
-      ...item.platforms[site],
-      status,
-      lastChecked: new Date().toISOString()
-    };
-
-    chrome.storage.local.set({ inventory });
-  });
-}
-
-function clearJobMutex() {
-  chrome.storage.local.set({ currentListingJob: null });
+  if (descriptionInjected && priceInjected) {
+    await SECOND_SKIN.updatePlatformMeta(item.id, "depop", "active");
+    SECOND_SKIN.clearJobMutex();
+    console.log("[Second Skin] Depop form fields injected for", item.id);
+    if (imagesInjected) console.log("[Second Skin] Depop images injected for", item.id);
+  } else {
+    console.warn("[Second Skin] Depop selectors not found — partial or no injection.");
+  }
 }
 
 // --- Passive profile scraper (sold-state detection) ---
 
 function passiveProfileScrape() {
-  // Guard: only run on seller profile routes like /username
   if (!window.location.pathname.match(/^\/[a-zA-Z0-9_.-]+\/?$/)) return;
 
   const cards = document.querySelectorAll('[data-testid="productCard"]');
@@ -109,11 +82,9 @@ function passiveProfileScrape() {
   });
 }
 
-// Run once after page settles, then watch for DOM mutations.
 setTimeout(passiveProfileScrape, 3500);
 
 const observer = new MutationObserver(() => {
-  // Debounce: avoid firing on every micro-mutation
   if (observer._timer) clearTimeout(observer._timer);
   observer._timer = setTimeout(passiveProfileScrape, 1500);
 });

@@ -14,12 +14,12 @@
   "content_scripts": [
     {
       "matches": ["*://*.depop.com/*"],
-      "js": ["content_depop.js"],
+      "js": ["shared.js", "content_depop.js"],
       "run_at": "document_end"
     },
     {
       "matches": ["*://*.grailed.com/*"],
-      "js": ["content_grailed.js"],
+      "js": ["shared.js", "content_grailed.js"],
       "run_at": "document_end"
     }
   ]
