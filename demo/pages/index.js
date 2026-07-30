@@ -21,6 +21,7 @@ export default function Home() {
   const [inventory, setInventory] = useState([]);
   const [view, setView] = useState("list"); // 'list' | 'form'
   const [editingId, setEditingId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // Form state
   const [url, setUrl] = useState("");
@@ -29,6 +30,7 @@ export default function Home() {
   const [tags, setTags] = useState("");
   const [price, setPrice] = useState("");
   const [images, setImages] = useState([]);
+  const [draggingIdx, setDraggingIdx] = useState(null);
   const [measurements, setMeasurements] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -314,6 +316,80 @@ export default function Home() {
     setImages((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const clearImages = () => {
+    if (!confirm("Remove all photos?")) return;
+    setImages([]);
+  };
+
+  const moveImage = (from, to) => {
+    if (from === to) return;
+    setImages((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(inventory.map((item) => item.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  const bulkDelete = () => {
+    if (!confirm(`Delete ${selectedIds.size} listings?`)) return;
+    setInventory((prev) => prev.filter((item) => !selectedIds.has(item.id)));
+    track("bulk_deleted", { count: selectedIds.size });
+    setSelectedIds(new Set());
+  };
+
+  const bulkPublish = async (platform) => {
+    if (!extStatus === "ready") return;
+    const targets = inventory.filter((item) => selectedIds.has(item.id));
+    if (targets.length === 0) return;
+
+    track(`bulk_publish_${platform}_clicked`, { count: targets.length });
+
+    for (const item of targets) {
+      setPlatformStatus(item.id, platform, "publishing");
+      const job = {
+        title: item.title,
+        description: [item.description, item.measurements].filter(Boolean).join("\n\n"),
+        tags: item.tags || [],
+        price: item.price,
+        images: item.images || [],
+      };
+
+      const response =
+        platform === "grailed"
+          ? await autofillGrailed(job)
+          : await publishDepop(job);
+
+      if (response?.ok) {
+        setPlatformStatus(item.id, platform, "published");
+      } else {
+        setPlatformStatus(item.id, platform, "draft");
+      }
+      // Small delay between sequential publishes to avoid tab spam.
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    track(`bulk_publish_${platform}_done`, { count: targets.length });
+    setSelectedIds(new Set());
+  };
+
   const copy = async (key, value) => {
     await navigator.clipboard.writeText(value);
     setCopied(key);
@@ -398,42 +474,87 @@ export default function Home() {
               <button className={styles.primary} onClick={startNew}>Create New Listing</button>
             </section>
           ) : (
-            <div className={styles.inventoryGrid}>
-              {inventory.map((item) => (
-                <div key={item.id} className={styles.inventoryCard}>
-                  <div
-                    className={styles.inventoryThumb}
-                    onClick={() => loadIntoForm(item)}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    {item.images?.[0] ? (
-                      <img src={item.images[0]} alt={item.title} />
-                    ) : (
-                      <div className={styles.noImage}>No photo</div>
-                    )}
-                  </div>
-                  <div className={styles.inventoryBody}>
-                    <h3 onClick={() => loadIntoForm(item)} role="button" tabIndex={0}>
-                      {item.title}
-                    </h3>
-                    <p className={styles.price}>{item.price ? `$${item.price}` : "No price"}</p>
-                    <div className={styles.badgeRow}>
-                      <span className={`${styles.badge} ${styles[`status${capitalize(item.platforms?.grailed?.status)}`]}`}>
-                        Grailed: {STATUS_LABEL[item.platforms?.grailed?.status] || "Draft"}
-                      </span>
-                      <span className={`${styles.badge} ${styles[`status${capitalize(item.platforms?.depop?.status)}`]}`}>
-                        Depop: {STATUS_LABEL[item.platforms?.depop?.status] || "Draft"}
-                      </span>
-                    </div>
-                    <div className={styles.inventoryActions}>
-                      <button className={styles.secondary} onClick={() => loadIntoForm(item)}>Edit / Publish</button>
-                      <button className={styles.danger} onClick={() => deleteListing(item.id)}>Delete</button>
-                    </div>
+            <>
+              <section className={styles.card}>
+                <div className={styles.bulkBar}>
+                  <label className={styles.selectAll}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.size === inventory.length && inventory.length > 0}
+                      onChange={(e) => (e.target.checked ? selectAll() : clearSelection())}
+                    />
+                    Select all
+                  </label>
+                  <div className={styles.bulkActions}>
+                    <button
+                      className={styles.secondary}
+                      disabled={selectedIds.size === 0 || extStatus !== "ready"}
+                      onClick={() => bulkPublish("grailed")}
+                    >
+                      Publish {selectedIds.size > 0 && `(${selectedIds.size})`} to Grailed
+                    </button>
+                    <button
+                      className={styles.secondary}
+                      disabled={selectedIds.size === 0 || extStatus !== "ready"}
+                      onClick={() => bulkPublish("depop")}
+                    >
+                      Publish {selectedIds.size > 0 && `(${selectedIds.size})`} to Depop
+                    </button>
+                    <button
+                      className={styles.danger}
+                      disabled={selectedIds.size === 0}
+                      onClick={bulkDelete}
+                    >
+                      Delete {selectedIds.size > 0 && `(${selectedIds.size})`}
+                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
+              </section>
+
+              <div className={styles.inventoryGrid}>
+                {inventory.map((item) => (
+                  <div key={item.id} className={styles.inventoryCard}>
+                    <label className={styles.cardCheckbox}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelect(item.id)}
+                      />
+                    </label>
+                    <div
+                      className={styles.inventoryThumb}
+                      onClick={() => loadIntoForm(item)}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      {item.images?.[0] ? (
+                        <img src={item.images[0]} alt={item.title} />
+                      ) : (
+                        <div className={styles.noImage}>No photo</div>
+                      )}
+                    </div>
+                    <div className={styles.inventoryBody}>
+                      <h3 onClick={() => loadIntoForm(item)} role="button" tabIndex={0}>
+                        {item.title}
+                      </h3>
+                      <p className={styles.price}>{item.price ? `$${item.price}` : "No price"}</p>
+                      <div className={styles.badgeRow}>
+                        <span className={`${styles.badge} ${styles[`status${capitalize(item.platforms?.grailed?.status)}`]}`}>
+                          Grailed: {STATUS_LABEL[item.platforms?.grailed?.status] || "Draft"}
+                        </span>
+                        <span className={`${styles.badge} ${styles[`status${capitalize(item.platforms?.depop?.status)}`]}`}>
+                          Depop: {STATUS_LABEL[item.platforms?.depop?.status] || "Draft"}
+                        </span>
+                      </div>
+                      <div className={styles.inventoryActions}>
+                        <button className={styles.secondary} onClick={() => loadIntoForm(item)}>Edit / Publish</button>
+                        <button className={styles.danger} onClick={() => deleteListing(item.id)}>Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </>
       )}
@@ -534,21 +655,38 @@ export default function Home() {
                 className={styles.fileInput}
               />
               {images.length > 0 && (
-                <div className={styles.thumbnails}>
-                  {images.map((src, i) => (
-                    <div key={i} className={styles.thumbWrap}>
-                      <img src={src} alt={`Uploaded ${i + 1}`} />
-                      <button
-                        className={styles.removeThumb}
-                        onClick={() => removeImage(i)}
-                        title="Remove"
-                        type="button"
+                <>
+                  <p className={styles.hint}>Drag photos to reorder. First photo is the listing thumbnail.</p>
+                  <div className={styles.thumbnails}>
+                    {images.map((src, i) => (
+                      <div
+                        key={i}
+                        className={`${styles.thumbWrap} ${draggingIdx === i ? styles.dragging : ""} ${i === 0 ? styles.primaryThumb : ""}`}
+                        draggable
+                        onDragStart={() => setDraggingIdx(i)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (draggingIdx !== i) moveImage(draggingIdx, i);
+                        }}
+                        onDragEnd={() => setDraggingIdx(null)}
                       >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                        <img src={src} alt={`Uploaded ${i + 1}`} />
+                        {i === 0 && <span className={styles.heroBadge}>Hero</span>}
+                        <button
+                          className={styles.removeThumb}
+                          onClick={() => removeImage(i)}
+                          title="Remove"
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className={styles.actions}>
+                    <button className={styles.secondary} onClick={clearImages}>Clear all photos</button>
+                  </div>
+                </>
               )}
             </div>
             <div className={styles.actions}>

@@ -407,3 +407,80 @@
 .danger:hover {
   background: #fef2f2;
 }
+
+.thumbWrap {
+  cursor: grab;
+  position: relative;
+}
+
+.thumbWrap.dragging {
+  opacity: 0.6;
+  cursor: grabbing;
+}
+
+.thumbWrap.primaryThumb {
+  outline: 2px solid #111;
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+.heroBadge {
+  position: absolute;
+  top: 0.25rem;
+  left: 0.25rem;
+  background: #111;
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bulkBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.selectAll {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.bulkActions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.bulkActions button {
+  font-size: 0.85rem;
+  padding: 0.45rem 0.75rem;
+}
+
+.cardCheckbox {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 1;
+  background: #fff;
+  border-radius: 4px;
+  padding: 0.25rem;
+  line-height: 1;
+}
+
+.cardCheckbox input {
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+}
+
+.inventoryCard {
+  position: relative;
+}
