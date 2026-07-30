@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Second Skin</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: #fff;
+        color: #111;
+        width: 280px;
+      }
+      .container { padding: 16px; }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 13px;
+        color: #555;
+        margin: 0 0 16px;
+        line-height: 1.4;
+      }
+      button {
+        width: 100%;
+        padding: 10px 12px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .primary {
+        background: #111;
+        color: #fff;
+      }
+      .primary:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .secondary {
+        background: #fff;
+        color: #111;
+        border: 1px solid #d4d4d4;
+        margin-top: 8px;
+      }
+      .status {
+        font-size: 12px;
+        margin-top: 10px;
+        color: #737373;
+      }
+      .error {
+        color: #991b1b;
+        font-size: 12px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Second Skin</h1>
+      <p id="hint">Open a Depop listing to cross-list it to Grailed.</p>
+      <button id="crossListBtn" class="primary" disabled>Cross-list to Grailed</button>
+      <button id="openDemoBtn" class="secondary">Open demo</button>
+      <div id="status" class="status"></div>
+      <div id="error" class="error"></div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

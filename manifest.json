@@ -13,6 +13,10 @@
   "background": {
     "service_worker": "background.js"
   },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Second Skin: cross-list this item"
+  },
   "options_page": "dashboard.html",
   "externally_connectable": {
     "matches": [

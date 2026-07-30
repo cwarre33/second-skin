@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { improveListing } from "@/lib/api";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { useExtension } from "@/hooks/useExtension";
@@ -18,6 +18,30 @@ export default function Home() {
 
   const { track } = useAnalytics();
   const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed } = useExtension();
+
+  // Prefill the form from query params sent by the extension popup or shared links.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const source = params.get("source");
+    const paramUrl = params.get("url") || "";
+    const paramTitle = params.get("title") || "";
+    const paramDescription = params.get("description") || "";
+    const paramTags = params.get("tags") || "";
+    const paramPrice = params.get("price") || "";
+    const paramImage = params.get("image") || "";
+
+    if (paramUrl) setUrl(paramUrl);
+    if (paramTitle) setTitle(paramTitle);
+    if (paramDescription) setDescription(paramDescription);
+    if (paramTags) setTags(paramTags);
+    if (paramPrice) setPrice(paramPrice);
+    if (paramImage) setImages([paramImage]);
+
+    if (source) {
+      track("prefill_from_query", { source });
+    }
+  }, [track]);
 
   const handleImprove = async () => {
     setError("");
@@ -157,7 +181,7 @@ export default function Home() {
       <section className={styles.card}>
         <h2>1. Source</h2>
         <div className={styles.field}>
-          <label htmlFor="url">Depop URL (optional)</label>
+          <label htmlFor="url">Listing URL (optional)</label>
           <input
             id="url"
             type="url"
@@ -166,8 +190,8 @@ export default function Home() {
             onChange={(e) => setUrl(e.target.value)}
           />
           <p className={styles.hint}>
-            Requires the Second Skin extension. Leave blank to enter fields
-            manually.
+            Paste a Depop listing URL, or cross-list from another supported
+            platform. Leave blank to enter fields manually.
           </p>
         </div>
         <div className={styles.actions}>
@@ -176,7 +200,7 @@ export default function Home() {
             onClick={handleParseDepop}
             disabled={!url.trim() || loading}
           >
-            Pull from Depop
+            Pull from URL
           </button>
         </div>
 
@@ -220,6 +244,17 @@ export default function Home() {
             placeholder="vintage, levis, denim"
           />
           <p className={styles.hint}>Comma-separated.</p>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="price">Price (optional)</label>
+          <input
+            id="price"
+            type="text"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder="120"
+          />
+          <p className={styles.hint}>Used when improving for market-specific pricing.</p>
         </div>
         <div className={styles.actions}>
           <button
