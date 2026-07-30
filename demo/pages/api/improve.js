@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "Rate limit exceeded. Try again in a minute." });
   }
 
-  const { platform = "grailed", title = "", description = "", tags = [] } = req.body || {};
+  const { platform = "grailed", title = "", description = "", tags = [], price = "" } = req.body || {};
 
   if (!title.trim() && !description.trim()) {
     return res.status(400).json({ error: "Provide a title or description." });
@@ -55,7 +55,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const improved = await improveWithNim({ platform, title, description, tags });
+    const improved = await improveWithNim({ platform, title, description, tags, price });
     return res.status(200).json(improved);
   } catch (err) {
     console.error("[/api/improve] NIM error:", err);
@@ -65,7 +65,7 @@ export default async function handler(req, res) {
   }
 }
 
-async function improveWithNim({ platform, title, description, tags }) {
+async function improveWithNim({ platform, title, description, tags, price }) {
   const existingTags = Array.isArray(tags) ? tags.join(", ") : String(tags || "");
 
   const prompt = [
@@ -77,12 +77,13 @@ async function improveWithNim({ platform, title, description, tags }) {
     "- title: under 60 characters, specific, includes brand/era/color/size if known.",
     "- description: 2-4 sentences, mention fit, fabric, condition, and style.",
     "- tags: 5-10 relevant lowercase tags. No hashtags.",
+    price ? "- price context (do NOT return price): " + price : "",
     "- Return ONLY the JSON object, no markdown, no explanation.",
     "",
     "Draft title:", title || "(none)",
     "Draft description:", description || "(none)",
     "Existing tags:", existingTags || "(none)",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);

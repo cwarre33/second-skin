@@ -102,45 +102,113 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 function parseActiveListing() {
-  const titleEl =
-    document.querySelector('h1') ||
-    document.querySelector('[data-testid*="title" i]') ||
-    document.querySelector('[class*="title" i]');
+  const title = pickText([
+    '[data-testid*="title" i]',
+    'h1',
+    '[class*="title" i]',
+    'meta[property="og:title"]',
+    'meta[name="twitter:title"]'
+  ]);
 
-  const descriptionEl =
-    document.querySelector('[data-testid*="description" i]') ||
-    document.querySelector('.description p') ||
-    document.querySelector('p[class*="description" i]') ||
-    document.querySelector('meta[name="description"]');
+  const description = pickText([
+    '[data-testid*="description" i]',
+    '[class*="description" i]',
+    '.description p',
+    'p[class*="description" i]',
+    'meta[property="og:description"]',
+    'meta[name="description"]'
+  ]);
 
-  const title = (titleEl?.textContent || titleEl?.content || "").trim();
-  const description = (descriptionEl?.textContent || descriptionEl?.content || "").trim();
+  const price = pickText([
+    '[data-testid*="price" i]',
+    '[class*="price" i]',
+    'meta[property="product:price:amount"]'
+  ]).replace(/[^\d.,]/g, "");
 
-  // Simple tag extraction from the title/description and page meta keywords.
-  const metaKeywords = document.querySelector('meta[name="keywords"]');
-  const keywords = metaKeywords?.content || "";
-  const tags = Array.from(new Set([
-    ...keywords.split(/[,\s]+/).filter(Boolean),
+  const images = pickImages();
+
+  const rawTags = [
+    ...extractMetaKeywords(),
     ...extractFashionTokens(title),
     ...extractFashionTokens(description)
-  ])).slice(0, 10);
+  ];
+
+  const tags = dedupeAndTrim(rawTags, 10);
 
   return {
     url: window.location.href,
     title,
     description,
+    price,
+    images,
     tags
   };
 }
 
+function pickText(selectors) {
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const text = (el.textContent || el.content || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function pickImages() {
+  // Cheap image collection: og:image, product shots from data-src/src, and srcset.
+  const urls = new Set();
+
+  document.querySelectorAll('meta[property="og:image"], meta[property="og:image:secure_url"]').forEach((m) => {
+    const url = m.getAttribute("content");
+    if (url) urls.add(resolveUrl(url));
+  });
+
+  document.querySelectorAll('img').forEach((img) => {
+    const src =
+      img.getAttribute("data-src") ||
+      img.getAttribute("data-lazy-src") ||
+      img.getAttribute("src");
+    if (!src) return;
+    const absolute = resolveUrl(src);
+    // Skip tiny icons and generic placeholders.
+    if (absolute.match(/\.(svg|png|ico)(\?|$)/i) && !absolute.match(/depop|cdn/i)) return;
+    urls.add(absolute);
+  });
+
+  return Array.from(urls).slice(0, 8);
+}
+
+function resolveUrl(src) {
+  try {
+    return new URL(src, window.location.href).href;
+  } catch {
+    return src;
+  }
+}
+
+function extractMetaKeywords() {
+  const meta = document.querySelector('meta[name="keywords"]');
+  if (!meta) return [];
+  return (meta.getAttribute("content") || "").split(/[,\s]+/).filter(Boolean);
+}
+
 function extractFashionTokens(text) {
   if (!text) return [];
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
   const tokens = [];
-  const brands = ["nike", "adidas", "supreme", "levis", "vintage", "carhartt", "ralph lauren", "champion"];
-  const categories = ["tee", "t-shirt", "shirt", "jacket", "pants", "jeans", "shorts", "hoodie", "sweatshirt", "dress"];
-  for (const word of [...brands, ...categories]) {
+  const keywords = [
+    "nike", "adidas", "supreme", "levis", "carhartt", "champion", "ralph lauren",
+    "vintage", "retro", "y2k", "streetwear", "rare", "deadstock",
+    "tee", "t-shirt", "tshirt", "shirt", "jacket", "pants", "jeans", "shorts",
+    "hoodie", "sweatshirt", "dress", "sweater", "coat", "flannel"
+  ];
+  for (const word of keywords) {
     if (lower.includes(word)) tokens.push(word);
   }
   return tokens;
+}
+
+function dedupeAndTrim(items, limit) {
+  return Array.from(new Set(items.map((s) => String(s).trim().toLowerCase()).filter(Boolean))).slice(0, limit);
 }

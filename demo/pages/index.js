@@ -9,6 +9,8 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
+  const [price, setPrice] = useState("");
+  const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -29,6 +31,7 @@ export default function Home() {
         title,
         description,
         tags,
+        price,
       };
       const improved = await improveListing(payload);
       setResult(improved);
@@ -56,6 +59,8 @@ export default function Home() {
       setTitle(job.title || "");
       setDescription(job.description || "");
       setTags(Array.isArray(job.tags) ? job.tags.join(", ") : job.tags || "");
+      setPrice(String(job.price || ""));
+      setImages(Array.isArray(job.images) ? job.images : []);
       track("parse_depop_succeeded");
     } catch (err) {
       // Fallback: keep the URL so the user can fill fields manually.
@@ -143,6 +148,14 @@ export default function Home() {
             Pull from Depop
           </button>
         </div>
+
+        {images.length > 0 && (
+          <div className={styles.thumbnails}>
+            {images.slice(0, 4).map((src, i) => (
+              <img key={i} src={src} alt={`Depop image ${i + 1}`} />
+            ))}
+          </div>
+        )}
       </section>
 
       <section className={styles.card}>
