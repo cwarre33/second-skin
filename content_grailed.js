@@ -44,10 +44,7 @@ async function processGrailedForm(item, options = {}) {
   }
 
   if (Array.isArray(item.tags) && item.tags.length > 0) {
-    const tagsOk = await fillTags(item.tags);
-    if (tagsOk) {
-      console.log("[Second Skin] Grailed tags injected:", item.tags.join(", "));
-    }
+    await fillTags(item.tags);
   }
 
   // Demo jobs keep images, sizing, category, designer, and condition manual (#32).
@@ -98,16 +95,15 @@ async function fillBasicFields(item) {
 }
 
 async function fillTags(tags) {
-  const input = await SECOND_SKIN.waitFor(
-    'input[name="tags" i], input[placeholder*="tag" i], input[aria-label*="tag" i], textarea[placeholder*="tag" i]',
-    3000
-  );
+  const tagString = Array.isArray(tags) ? tags.join(", ") : String(tags);
+  if (!tagString) return false;
+
+  const input = await findTagsInput();
   if (!input) {
-    console.warn("[Second Skin] Grailed tags input not found — tags skipped.");
+    console.warn("[Second Skin] Grailed tags input not found — tried input[name/tags], placeholders, aria-labels, contenteditable, and label scan. Tags skipped.");
     return false;
   }
 
-  const tagString = tags.join(", ");
   SECOND_SKIN.dispatchSyntheticInput(input, tagString);
 
   // Grailed may require a keypress/blur to commit tag chips.
@@ -115,7 +111,60 @@ async function fillTags(tags) {
   input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
   input.blur();
 
+  console.log("[Second Skin] Grailed tags injected:", tagString);
   return true;
+}
+
+async function findTagsInput() {
+  const selectors = [
+    'input[name="tags" i]',
+    'input[id*="tags" i]',
+    'input[placeholder*="tag" i]',
+    'input[aria-label*="tag" i]',
+    'textarea[placeholder*="tag" i]',
+    'textarea[aria-label*="tag" i]',
+    '[contenteditable="true"][placeholder*="tag" i]',
+    '[contenteditable="true"][aria-label*="tag" i]',
+    '[data-testid*="tag" i] input',
+    '[data-testid*="tag" i] [contenteditable="true"]'
+  ];
+
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && isVisible(el)) return el;
+  }
+
+  // Fallback: scan labels/headings near an editable field that mention "tag".
+  const labels = document.querySelectorAll('label, span, div, p, h1, h2, h3, h4');
+  for (const label of labels) {
+    const text = (label.textContent || "").toLowerCase();
+    if (text.includes("tag") || text.includes("keyword") || text.includes("style")) {
+      // Look for an input or contenteditable within the same parent container.
+      const container = label.closest('[class*="field" i], [class*="input" i], [class*="form-group" i], [data-testid*="field" i]') || label.parentElement;
+      if (container) {
+        const candidate = container.querySelector('input, textarea, [contenteditable="true"]');
+        if (candidate && isVisible(candidate)) return candidate;
+      }
+    }
+  }
+
+  // Last resort: any visible contenteditable or input after a "Tags" heading.
+  const allEditable = document.querySelectorAll('input, textarea, [contenteditable="true"]');
+  for (const el of allEditable) {
+    if (!isVisible(el)) continue;
+    const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+    const placeholder = (el.getAttribute("placeholder") || "").toLowerCase();
+    const idName = (el.id || el.name || "").toLowerCase();
+    if (aria.includes("tag") || placeholder.includes("tag") || idName.includes("tag")) {
+      return el;
+    }
+  }
+
+  return null;
+}
+
+function isVisible(el) {
+  return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 }
 
 async function uploadImages(item) {
