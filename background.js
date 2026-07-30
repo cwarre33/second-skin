@@ -8,7 +8,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Seed Ollama defaults if the user has not configured them yet.
 chrome.runtime.onInstalled.addListener(async () => {
-  const result = await storageGet(["ollamaConfig"]);
+  const result = await storageGet(["ollamaConfig", "allowedOrigins"]);
   if (!result.ollamaConfig) {
     await storageSet({
       ollamaConfig: {
@@ -19,14 +19,16 @@ chrome.runtime.onInstalled.addListener(async () => {
       }
     });
   }
+  if (!result.allowedOrigins) {
+    await storageSet({ allowedOrigins: DEFAULT_ALLOWED_ORIGINS });
+  }
 });
 
-// Allowed web origins for the demo (issue #30).
-const ALLOWED_ORIGINS = new Set([
+const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   "https://second-skin-zeta.vercel.app"
-]);
+];
 
 function storageSet(items) {
   return new Promise((resolve) => chrome.storage.local.set(items, resolve));
@@ -36,9 +38,14 @@ function storageGet(keys) {
   return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
 }
 
-function isAllowedOrigin(url) {
+async function getAllowedOrigins() {
+  const result = await storageGet(["allowedOrigins"]);
+  return new Set(result.allowedOrigins || DEFAULT_ALLOWED_ORIGINS);
+}
+
+async function isAllowedOrigin(url) {
   try {
-    return ALLOWED_ORIGINS.has(new URL(url).origin);
+    return (await getAllowedOrigins()).has(new URL(url).origin);
   } catch {
     return false;
   }
@@ -48,35 +55,38 @@ function isAllowedOrigin(url) {
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   console.log("[Second Skin] External message from", sender.url, "type:", message?.type);
 
-  if (!isAllowedOrigin(sender.url)) {
-    console.warn("[Second Skin] Unauthorized origin:", sender.url);
-    sendResponse({ ok: false, error: "Unauthorized origin" });
-    return false;
-  }
+  isAllowedOrigin(sender.url).then((allowed) => {
+    if (!allowed) {
+      console.warn("[Second Skin] Unauthorized origin:", sender.url);
+      sendResponse({ ok: false, error: "Unauthorized origin" });
+      return;
+    }
 
-  const { type } = message || {};
+    const { type } = message || {};
 
-  if (type === "PING") {
-    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
-    return false;
-  }
+    if (type === "PING") {
+      sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+      return;
+    }
 
-  if (type === "PARSE_DEPOP") {
-    handleParseDepop(message.url).then(sendResponse).catch((err) => {
-      sendResponse({ ok: false, error: err.message });
-    });
-    return true; // async
-  }
+    if (type === "PARSE_DEPOP") {
+      handleParseDepop(message.url).then(sendResponse).catch((err) => {
+        sendResponse({ ok: false, error: err.message });
+      });
+      return;
+    }
 
-  if (type === "AUTOFILL_GRAILED") {
-    handleAutofillGrailed(message.job).then(sendResponse).catch((err) => {
-      sendResponse({ ok: false, error: err.message });
-    });
-    return true; // async
-  }
+    if (type === "AUTOFILL_GRAILED") {
+      handleAutofillGrailed(message.job).then(sendResponse).catch((err) => {
+        sendResponse({ ok: false, error: err.message });
+      });
+      return;
+    }
 
-  sendResponse({ ok: false, error: `Unknown message type: ${type}` });
-  return false;
+    sendResponse({ ok: false, error: `Unknown message type: ${type}` });
+  });
+
+  return true; // keep channel open for async origin check
 });
 
 async function handleParseDepop(url) {

@@ -147,6 +147,52 @@
       cursor: not-allowed;
       border-color: #444;
     }
+
+    .settings-card {
+      background: var(--panel);
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1.5rem;
+      max-width: 640px;
+    }
+    .settings-card h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1.1rem;
+    }
+    .settings-card p {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin: 0 0 0.75rem;
+    }
+    .origin-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .origin-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .origin-row input {
+      flex: 1;
+      background: #0d0d0d;
+      color: var(--text);
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 0.45rem 0.5rem;
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+    .origin-row button {
+      padding: 0.45rem 0.6rem;
+    }
+    .origin-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
   </style>
 </head>
 <body>
@@ -165,6 +211,17 @@
   </div>
 
   <div id="inventory-container" class="inventory-grid"></div>
+
+  <section class="settings-card">
+    <h2>Allowed Demo Origins</h2>
+    <p>These are the web origins permitted to send messages to the extension. Keep localhost for dev and add your custom demo domain when you deploy.</p>
+    <div id="origin-list" class="origin-list"></div>
+    <div class="origin-actions">
+      <button id="add-origin">+ Add Origin</button>
+      <button id="save-origins">Save Origins</button>
+      <button id="reset-origins">Reset Defaults</button>
+    </div>
+  </section>
 
   <script src="ollama.js"></script>
   <script src="dashboard.js"></script>

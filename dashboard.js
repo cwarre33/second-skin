@@ -30,6 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeDatabase();
   setupEventDelegation();
   setupControls();
+  setupOriginSettings();
 });
 
 function initializeDatabase() {
@@ -334,6 +335,88 @@ function executeCrossListJob(itemId, targetSite) {
     currentListingJob: { itemId, targetSite }
   }, () => {
     chrome.tabs.create({ url: targetUrl });
+  });
+}
+
+// --- Allowed origins settings (#34) ---
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://second-skin-zeta.vercel.app"
+];
+
+let originEditorValues = [];
+
+function setupOriginSettings() {
+  const list = document.getElementById("origin-list");
+  const addBtn = document.getElementById("add-origin");
+  const saveBtn = document.getElementById("save-origins");
+  const resetBtn = document.getElementById("reset-origins");
+  if (!list || !addBtn || !saveBtn || !resetBtn) return;
+
+  chrome.storage.local.get(["allowedOrigins"], (result) => {
+    originEditorValues = result.allowedOrigins ? [...result.allowedOrigins] : [...DEFAULT_ALLOWED_ORIGINS];
+    renderOriginList();
+  });
+
+  addBtn.addEventListener("click", () => {
+    originEditorValues.push("");
+    renderOriginList();
+  });
+
+  saveBtn.addEventListener("click", () => {
+    const cleaned = originEditorValues
+      .map((s) => s.trim().replace(/\/$/, ""))
+      .filter((s) => s)
+      .filter((s, i, arr) => arr.indexOf(s) === i);
+
+    const invalid = cleaned.find((s) => !/^https?:\/\/.+/.test(s));
+    if (invalid) {
+      alert(`Invalid origin: ${invalid}\nOrigins must start with http:// or https://.`);
+      return;
+    }
+
+    chrome.storage.local.set({ allowedOrigins: cleaned }, () => {
+      originEditorValues = cleaned;
+      renderOriginList();
+      alert("Allowed origins saved. Reload the extension if testing locally.");
+    });
+  });
+
+  resetBtn.addEventListener("click", () => {
+    if (confirm("Reset allowed origins to defaults?")) {
+      chrome.storage.local.set({ allowedOrigins: DEFAULT_ALLOWED_ORIGINS }, () => {
+        originEditorValues = [...DEFAULT_ALLOWED_ORIGINS];
+        renderOriginList();
+      });
+    }
+  });
+}
+
+function renderOriginList() {
+  const list = document.getElementById("origin-list");
+  if (!list) return;
+  list.innerHTML = originEditorValues.map((origin, idx) => `
+    <div class="origin-row" data-idx="${idx}">
+      <input type="url" value="${escapeHtml(origin)}" placeholder="https://your-domain.vercel.app" />
+      <button class="remove-origin" data-idx="${idx}" title="Remove">×</button>
+    </div>
+  `).join("");
+
+  list.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("input", (e) => {
+      const idx = Number(e.target.closest(".origin-row").getAttribute("data-idx"));
+      originEditorValues[idx] = e.target.value;
+    });
+  });
+
+  list.querySelectorAll(".remove-origin").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = Number(e.target.getAttribute("data-idx"));
+      originEditorValues.splice(idx, 1);
+      renderOriginList();
+    });
   });
 }
 
