@@ -123,6 +123,24 @@ export default function Home() {
 
       {error && <div className={styles.error}>{error}</div>}
 
+      {extStatus === "missing" && (
+        <section className={`${styles.card} ${styles.ctaCard}`}>
+          <h2>Install the Second Skin extension</h2>
+          <p>
+            Copy buttons work without it, but the extension enables one-click
+            Grailed autofill.
+          </p>
+          <a
+            className={styles.primary}
+            href="https://developer.chrome.com/docs/extensions/mv3/getstarted#unpacked"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Load unpacked extension
+          </a>
+        </section>
+      )}
+
       <section className={styles.card}>
         <h2>1. Source</h2>
         <div className={styles.field}>
@@ -203,44 +221,42 @@ export default function Home() {
 
       {result && (
         <section className={styles.card}>
-          <h2>3. Improved for {result.platform}</h2>
-
-          <div className={styles.output}>
-            <h3>Title</h3>
-            <p>{result.title}</p>
+          <div className={styles.sectionHeader}>
+            <h2>3. Improved for {result.platform}</h2>
+            <button
+              className={styles.secondary}
+              onClick={() => copy("all", `${result.title}\n\n${result.description}\n\n${result.tags.join(", ")}`)}
+            >
+              {copied === "all" ? "Copied!" : "Copy all"}
+            </button>
           </div>
-          <button
-            className={styles.secondary}
-            onClick={() => copy("title", result.title)}
-          >
-            {copied === "title" ? "Copied!" : "Copy title"}
-          </button>
 
-          <div className={styles.output}>
-            <h3>Description</h3>
-            <p>{result.description}</p>
-          </div>
-          <button
-            className={styles.secondary}
-            onClick={() => copy("description", result.description)}
-          >
-            {copied === "description" ? "Copied!" : "Copy description"}
-          </button>
-
-          <div className={styles.output}>
-            <h3>Tags</h3>
-            <ul>
-              {result.tags.map((tag, i) => (
-                <li key={i}>{tag}</li>
-              ))}
-            </ul>
-          </div>
-          <button
-            className={styles.secondary}
-            onClick={() => copy("tags", result.tags.join(", "))}
-          >
-            {copied === "tags" ? "Copied!" : "Copy tags"}
-          </button>
+          {[
+            { key: "title", label: "Title", value: result.title },
+            { key: "description", label: "Description", value: result.description },
+            { key: "tags", label: "Tags", value: result.tags.join(", ") },
+          ].map(({ key, label, value }) => (
+            <div key={key} className={styles.outputRow}>
+              <div className={styles.output}>
+                <h3>{label}</h3>
+                {key === "tags" ? (
+                  <ul>
+                    {result.tags.map((tag, i) => (
+                      <li key={i}>{tag}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>{value}</p>
+                )}
+              </div>
+              <button
+                className={styles.secondary}
+                onClick={() => copy(key, value)}
+              >
+                {copied === key ? "Copied!" : `Copy ${label.toLowerCase()}`}
+              </button>
+            </div>
+          ))}
 
           <div className={styles.actions} style={{ marginTop: "1rem" }}>
             <button
@@ -248,7 +264,7 @@ export default function Home() {
               onClick={handleAutofillGrailed}
               disabled={extStatus !== "ready"}
             >
-              Autofill Grailed
+              {extStatus === "ready" ? "Autofill Grailed" : "Install extension to autofill"}
             </button>
           </div>
         </section>

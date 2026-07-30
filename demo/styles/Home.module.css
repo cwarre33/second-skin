@@ -191,3 +191,47 @@
   border-radius: 0.5rem;
   border: 1px solid #e5e5e5;
 }
+
+.ctaCard {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.ctaCard h2 {
+  margin-bottom: 0.5rem;
+}
+
+.ctaCard p {
+  color: #1e40af;
+  margin-bottom: 1rem;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.sectionHeader h2 {
+  margin-bottom: 0;
+}
+
+.outputRow {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.outputRow .output {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.outputRow button {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
