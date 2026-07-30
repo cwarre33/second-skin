@@ -2,9 +2,27 @@ import { useEffect, useState } from "react";
 import { improveListing } from "@/lib/api";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { useExtension } from "@/hooks/useExtension";
+import {
+  createListing,
+  loadInventory,
+  saveInventory,
+  updateListingStatus,
+} from "@/lib/inventory";
 import styles from "@/styles/Home.module.css";
 
+const STATUS_LABEL = {
+  draft: "Draft",
+  publishing: "Publishing...",
+  published: "Needs review",
+  review: "Needs review",
+};
+
 export default function Home() {
+  const [inventory, setInventory] = useState([]);
+  const [view, setView] = useState("list"); // 'list' | 'form'
+  const [editingId, setEditingId] = useState(null);
+
+  // Form state
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -21,6 +39,18 @@ export default function Home() {
   const { track } = useAnalytics();
   const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed, publishDepop } = useExtension();
 
+  // Load inventory on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setInventory(loadInventory());
+  }, []);
+
+  // Persist inventory on change.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    saveInventory(inventory);
+  }, [inventory]);
+
   // Prefill the form from query params sent by the extension popup or shared links.
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -34,6 +64,10 @@ export default function Home() {
     const paramImage = params.get("image") || "";
     const paramMeasurements = params.get("measurements") || "";
 
+    if (paramUrl || paramTitle || paramDescription || paramTags || paramPrice || paramImage || paramMeasurements) {
+      setView("form");
+    }
+
     if (paramUrl) setUrl(paramUrl);
     if (paramTitle) setTitle(paramTitle);
     if (paramDescription) setDescription(paramDescription);
@@ -46,6 +80,94 @@ export default function Home() {
       track("prefill_from_query", { source });
     }
   }, [track]);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setUrl("");
+    setTitle("");
+    setDescription("");
+    setTags("");
+    setPrice("");
+    setImages([]);
+    setMeasurements("");
+    setResult(null);
+    setError("");
+    setPublished(null);
+  };
+
+  const startNew = () => {
+    resetForm();
+    setView("form");
+    track("create_new_listing");
+  };
+
+  const loadIntoForm = (listing) => {
+    setEditingId(listing.id);
+    setUrl(listing.url || "");
+    setTitle(listing.title || "");
+    setDescription(listing.description || "");
+    setTags(Array.isArray(listing.tags) ? listing.tags.join(", ") : listing.tags || "");
+    setPrice(String(listing.price || ""));
+    setImages(listing.images || []);
+    setMeasurements(listing.measurements || "");
+    setResult(null);
+    setError("");
+    setPublished(null);
+    setView("form");
+    track("edit_listing", { id: listing.id });
+  };
+
+  const saveCurrent = () => {
+    if (!title.trim()) {
+      setError("Title is required to save a listing.");
+      return;
+    }
+    setError("");
+
+    const draft = {
+      url,
+      title,
+      description,
+      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+      price,
+      measurements,
+      images,
+    };
+
+    setInventory((prev) => {
+      if (editingId) {
+        const next = prev.map((item) =>
+          item.id === editingId
+            ? { ...item, ...draft, updatedAt: new Date().toISOString() }
+            : item
+        );
+        track("listing_saved", { id: editingId, action: "update" });
+        return next;
+      }
+      const item = createListing(draft);
+      track("listing_saved", { id: item.id, action: "create" });
+      setEditingId(item.id);
+      return [item, ...prev];
+    });
+  };
+
+  const deleteListing = (id) => {
+    if (!confirm("Delete this listing?")) return;
+    setInventory((prev) => prev.filter((item) => item.id !== id));
+    track("listing_deleted", { id });
+    if (editingId === id) {
+      resetForm();
+      setView("list");
+    }
+  };
+
+  const setPlatformStatus = (id, platform, status, url = "") => {
+    setInventory((prev) =>
+      prev.map((item) =>
+        item.id === id ? updateListingStatus(item, platform, status, url) : item
+      )
+    );
+  };
 
   const handleImprove = async () => {
     setError("");
@@ -100,20 +222,42 @@ export default function Home() {
   };
 
   const handleAutofillGrailed = async () => {
-    if (!result) return;
+    const job = result ? result : buildJob();
+    if (!job.title) return;
+
+    const id = editingId || createListing(buildJob()).id;
+    if (!editingId) {
+      // Auto-save a brand-new listing before publishing.
+      setInventory((prev) => [createListing(buildJob()), ...prev]);
+      setEditingId(id);
+    }
+
+    setPlatformStatus(id, "grailed", "publishing");
+    setError("");
     track("autofill_grailed_clicked");
-    const response = await autofillGrailed(result);
+
+    const response = await autofillGrailed(job);
     if (response?.ok) {
       track("autofill_grailed_succeeded");
       setPublished("grailed");
+      setPlatformStatus(id, "grailed", "published");
     } else {
       setError(response?.error || "Could not autofill Grailed.");
       track("autofill_grailed_failed", { error: response?.error });
+      setPlatformStatus(id, "grailed", "draft");
     }
   };
 
   const handlePublishDepop = async () => {
     if (!title.trim()) return;
+
+    const id = editingId || createListing(buildJob()).id;
+    if (!editingId) {
+      setInventory((prev) => [createListing(buildJob()), ...prev]);
+      setEditingId(id);
+    }
+
+    setPlatformStatus(id, "depop", "publishing");
     setError("");
     setPublished(null);
     track("publish_depop_clicked");
@@ -123,9 +267,11 @@ export default function Home() {
     if (response?.ok) {
       track("publish_depop_succeeded");
       setPublished("depop");
+      setPlatformStatus(id, "depop", "published");
     } else {
       setError(response?.error || "Could not publish to Depop.");
       track("publish_depop_failed", { error: response?.error });
+      setPlatformStatus(id, "depop", "draft");
     }
   };
 
@@ -185,7 +331,7 @@ export default function Home() {
     <div className={styles.container}>
       <header className={styles.header}>
         <h1>Second Skin</h1>
-        <p>Create once, publish everywhere. Start from scratch or import a Depop listing.</p>
+        <p>Create once, publish everywhere. Manage your listings below.</p>
       </header>
 
       <div className={`${styles.extensionStatus} ${statusClass}`}>
@@ -225,8 +371,7 @@ export default function Home() {
         <section className={`${styles.card} ${styles.ctaCard}`}>
           <h2>Install the Second Skin extension</h2>
           <p>
-            Copy buttons work without it, but the extension enables one-click
-            Grailed autofill.
+            Copy buttons work without it, but the extension enables one-click publish to Depop and Grailed.
           </p>
           <a
             className={styles.primary}
@@ -239,196 +384,290 @@ export default function Home() {
         </section>
       )}
 
-      <section className={styles.card}>
-        <h2>1. Source</h2>
-        <div className={styles.field}>
-          <label htmlFor="url">Listing URL (optional)</label>
-          <input
-            id="url"
-            type="url"
-            placeholder="https://www.depop.com/products/..."
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-          <p className={styles.hint}>
-            Paste a Depop listing URL, or cross-list from another supported
-            platform. Leave blank to enter fields manually.
-          </p>
-        </div>
-        <div className={styles.actions}>
-          <button
-            className={styles.secondary}
-            onClick={handleParseDepop}
-            disabled={!url.trim() || loading}
-          >
-            Pull from URL
-          </button>
-        </div>
-
-        {images.length > 0 && (
-          <div className={styles.thumbnails}>
-            {images.slice(0, 4).map((src, i) => (
-              <img key={i} src={src} alt={`Depop image ${i + 1}`} />
-            ))}
+      {view === "list" && (
+        <>
+          <div className={styles.actions}>
+            <button className={styles.primary} onClick={startNew}>+ Create New Listing</button>
           </div>
-        )}
-      </section>
-
-      <section className={styles.card}>
-        <h2>2. Listing</h2>
-        <div className={styles.field}>
-          <label htmlFor="title">Title</label>
-          <input
-            id="title"
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Vintage Levi's 501"
-          />
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="description">Description</label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe the item, condition, and fit..."
-          />
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="tags">Tags</label>
-          <input
-            id="tags"
-            type="text"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-            placeholder="vintage, levis, denim"
-          />
-          <p className={styles.hint}>Comma-separated.</p>
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="price">Price (optional)</label>
-          <input
-            id="price"
-            type="text"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="120"
-          />
-          <p className={styles.hint}>Used when improving for market-specific pricing.</p>
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="measurements">Measurements (optional)</label>
-          <textarea
-            id="measurements"
-            value={measurements}
-            onChange={(e) => setMeasurements(e.target.value)}
-            placeholder="Pit to pit: 24in, Length: 29in, Shoulder: 19in..."
-          />
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="images">Photos (optional)</label>
-          <input
-            id="images"
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={handleImageUpload}
-            className={styles.fileInput}
-          />
-          {images.length > 0 && (
-            <div className={styles.thumbnails}>
-              {images.map((src, i) => (
-                <div key={i} className={styles.thumbWrap}>
-                  <img src={src} alt={`Uploaded ${i + 1}`} />
-                  <button
-                    className={styles.removeThumb}
-                    onClick={() => removeImage(i)}
-                    title="Remove"
-                    type="button"
+          {inventory.length === 0 ? (
+            <section className={styles.card}>
+              <h2>No listings yet</h2>
+              <p className={styles.hint}>
+                Create your first listing, or import one from a Depop URL or the extension popup.
+              </p>
+              <button className={styles.primary} onClick={startNew}>Create New Listing</button>
+            </section>
+          ) : (
+            <div className={styles.inventoryGrid}>
+              {inventory.map((item) => (
+                <div key={item.id} className={styles.inventoryCard}>
+                  <div
+                    className={styles.inventoryThumb}
+                    onClick={() => loadIntoForm(item)}
+                    role="button"
+                    tabIndex={0}
                   >
-                    ×
-                  </button>
+                    {item.images?.[0] ? (
+                      <img src={item.images[0]} alt={item.title} />
+                    ) : (
+                      <div className={styles.noImage}>No photo</div>
+                    )}
+                  </div>
+                  <div className={styles.inventoryBody}>
+                    <h3 onClick={() => loadIntoForm(item)} role="button" tabIndex={0}>
+                      {item.title}
+                    </h3>
+                    <p className={styles.price}>{item.price ? `$${item.price}` : "No price"}</p>
+                    <div className={styles.badgeRow}>
+                      <span className={`${styles.badge} ${styles[`status${capitalize(item.platforms?.grailed?.status)}`]}`}>
+                        Grailed: {STATUS_LABEL[item.platforms?.grailed?.status] || "Draft"}
+                      </span>
+                      <span className={`${styles.badge} ${styles[`status${capitalize(item.platforms?.depop?.status)}`]}`}>
+                        Depop: {STATUS_LABEL[item.platforms?.depop?.status] || "Draft"}
+                      </span>
+                    </div>
+                    <div className={styles.inventoryActions}>
+                      <button className={styles.secondary} onClick={() => loadIntoForm(item)}>Edit / Publish</button>
+                      <button className={styles.danger} onClick={() => deleteListing(item.id)}>Delete</button>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
-        <div className={styles.actions}>
-          <button
-            className={styles.primary}
-            onClick={handleImprove}
-            disabled={(!title.trim() && !description.trim()) || loading}
-          >
-            {loading ? "Improving..." : "Improve with AI"}
-          </button>
-        </div>
-      </section>
+        </>
+      )}
 
-      {result && (
-        <section className={styles.card}>
-          <div className={styles.sectionHeader}>
-            <h2>3. Improved for {result.platform}</h2>
-            <button
-              className={styles.secondary}
-              onClick={() => copy("all", `${result.title}\n\n${result.description}\n\n${result.tags.join(", ")}`)}
-            >
-              {copied === "all" ? "Copied!" : "Copy all"}
-            </button>
+      {view === "form" && (
+        <>
+          <div className={styles.actions}>
+            <button className={styles.secondary} onClick={() => setView("list")}>← Back to Inventory</button>
           </div>
 
-          {[
-            { key: "title", label: "Title", value: result.title },
-            { key: "description", label: "Description", value: result.description },
-            { key: "tags", label: "Tags", value: result.tags.join(", ") },
-          ].map(({ key, label, value }) => (
-            <div key={key} className={styles.outputRow}>
-              <div className={styles.output}>
-                <h3>{label}</h3>
-                {key === "tags" ? (
-                  <ul>
-                    {result.tags.map((tag, i) => (
-                      <li key={i}>{tag}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>{value}</p>
-                )}
-              </div>
+          <section className={styles.card}>
+            <h2>1. Source</h2>
+            <div className={styles.field}>
+              <label htmlFor="url">Listing URL (optional)</label>
+              <input
+                id="url"
+                type="url"
+                placeholder="https://www.depop.com/products/..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              <p className={styles.hint}>
+                Paste a Depop listing URL, or cross-list from another supported
+                platform. Leave blank to enter fields manually.
+              </p>
+            </div>
+            <div className={styles.actions}>
               <button
                 className={styles.secondary}
-                onClick={() => copy(key, value)}
+                onClick={handleParseDepop}
+                disabled={!url.trim() || loading}
               >
-                {copied === key ? "Copied!" : `Copy ${label.toLowerCase()}`}
+                Pull from URL
               </button>
             </div>
-          ))}
+          </section>
 
-          <div className={`${styles.actions} ${styles.platformActions}`}>
-            <button
-              className={styles.primary}
-              onClick={handleAutofillGrailed}
-              disabled={extStatus !== "ready"}
-            >
-              {extStatus === "ready" ? "Publish to Grailed" : "Install extension to publish"}
-            </button>
-            <button
-              className={styles.secondary}
-              onClick={handlePublishDepop}
-              disabled={extStatus !== "ready" || !title.trim()}
-            >
-              {extStatus === "ready" ? "Publish to Depop" : "Install extension to publish"}
-            </button>
-          </div>
-          {published && (
-            <div className={styles.success}>
-              {published === "grailed"
-                ? "Opened Grailed with this listing. Review and submit there."
-                : "Opened Depop with this listing. Review and submit there."}
+          <section className={styles.card}>
+            <h2>2. Listing</h2>
+            <div className={styles.field}>
+              <label htmlFor="title">Title</label>
+              <input
+                id="title"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Vintage Levi's 501"
+              />
             </div>
+            <div className={styles.field}>
+              <label htmlFor="description">Description</label>
+              <textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Describe the item, condition, and fit..."
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="tags">Tags</label>
+              <input
+                id="tags"
+                type="text"
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+                placeholder="vintage, levis, denim"
+              />
+              <p className={styles.hint}>Comma-separated.</p>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="price">Price (optional)</label>
+              <input
+                id="price"
+                type="text"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="120"
+              />
+              <p className={styles.hint}>Used when improving for market-specific pricing.</p>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="measurements">Measurements (optional)</label>
+              <textarea
+                id="measurements"
+                value={measurements}
+                onChange={(e) => setMeasurements(e.target.value)}
+                placeholder="Pit to pit: 24in, Length: 29in, Shoulder: 19in..."
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="images">Photos (optional)</label>
+              <input
+                id="images"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageUpload}
+                className={styles.fileInput}
+              />
+              {images.length > 0 && (
+                <div className={styles.thumbnails}>
+                  {images.map((src, i) => (
+                    <div key={i} className={styles.thumbWrap}>
+                      <img src={src} alt={`Uploaded ${i + 1}`} />
+                      <button
+                        className={styles.removeThumb}
+                        onClick={() => removeImage(i)}
+                        title="Remove"
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className={styles.actions}>
+              <button
+                className={styles.primary}
+                onClick={handleImprove}
+                disabled={(!title.trim() && !description.trim()) || loading}
+              >
+                {loading ? "Improving..." : "Improve with AI"}
+              </button>
+              <button
+                className={styles.secondary}
+                onClick={saveCurrent}
+                disabled={!title.trim()}
+              >
+                Save to Inventory
+              </button>
+            </div>
+          </section>
+
+          {result ? (
+            <section className={styles.card}>
+              <div className={styles.sectionHeader}>
+                <h2>3. Improved for {result.platform}</h2>
+                <button
+                  className={styles.secondary}
+                  onClick={() => copy("all", `${result.title}\n\n${result.description}\n\n${result.tags.join(", ")}`)}
+                >
+                  {copied === "all" ? "Copied!" : "Copy all"}
+                </button>
+              </div>
+
+              {[
+                { key: "title", label: "Title", value: result.title },
+                { key: "description", label: "Description", value: result.description },
+                { key: "tags", label: "Tags", value: result.tags.join(", ") },
+              ].map(({ key, label, value }) => (
+                <div key={key} className={styles.outputRow}>
+                  <div className={styles.output}>
+                    <h3>{label}</h3>
+                    {key === "tags" ? (
+                      <ul>
+                        {result.tags.map((tag, i) => (
+                          <li key={i}>{tag}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>{value}</p>
+                    )}
+                  </div>
+                  <button
+                    className={styles.secondary}
+                    onClick={() => copy(key, value)}
+                  >
+                    {copied === key ? "Copied!" : `Copy ${label.toLowerCase()}`}
+                  </button>
+                </div>
+              ))}
+
+              <div className={`${styles.actions} ${styles.platformActions}`}>
+                <button
+                  className={styles.primary}
+                  onClick={handleAutofillGrailed}
+                  disabled={extStatus !== "ready"}
+                >
+                  {extStatus === "ready" ? "Publish to Grailed" : "Install extension to publish"}
+                </button>
+                <button
+                  className={styles.secondary}
+                  onClick={handlePublishDepop}
+                  disabled={extStatus !== "ready" || !title.trim()}
+                >
+                  {extStatus === "ready" ? "Publish to Depop" : "Install extension to publish"}
+                </button>
+              </div>
+              {published && (
+                <div className={styles.success}>
+                  {published === "grailed"
+                    ? "Opened Grailed with this listing. Review and submit there."
+                    : "Opened Depop with this listing. Review and submit there."}
+                </div>
+              )}
+            </section>
+          ) : (
+            <section className={styles.card}>
+              <h2>3. Publish</h2>
+              <p className={styles.hint}>Publish directly from your current draft.</p>
+              <div className={`${styles.actions} ${styles.platformActions}`}>
+                <button
+                  className={styles.primary}
+                  onClick={handleAutofillGrailed}
+                  disabled={extStatus !== "ready" || !title.trim()}
+                >
+                  {extStatus === "ready" ? "Publish to Grailed" : "Install extension to publish"}
+                </button>
+                <button
+                  className={styles.secondary}
+                  onClick={handlePublishDepop}
+                  disabled={extStatus !== "ready" || !title.trim()}
+                >
+                  {extStatus === "ready" ? "Publish to Depop" : "Install extension to publish"}
+                </button>
+              </div>
+              {published && (
+                <div className={styles.success}>
+                  {published === "grailed"
+                    ? "Opened Grailed with this listing. Review and submit there."
+                    : "Opened Depop with this listing. Review and submit there."}
+                </div>
+              )}
+            </section>
           )}
-        </section>
+        </>
       )}
     </div>
   );
+}
+
+function capitalize(s) {
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
