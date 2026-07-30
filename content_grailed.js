@@ -5,79 +5,243 @@
     const job = state.currentListingJob;
     if (!job || job.targetSite !== "grailed") return;
 
-    const activeItem = (state.inventory || []).find((item) => item.id === job.itemId);
+    const activeItem = job.demoJob
+      ? job.demoJob
+      : (state.inventory || []).find((item) => item.id === job.itemId);
     if (!activeItem) {
       SECOND_SKIN.clearJobMutex();
       return;
     }
 
     if (window.location.href.includes("/sell")) {
-      processGrailedForm(activeItem);
+      processGrailedForm(activeItem, job.demoJob ? { demo: true } : {});
     }
   });
 })();
 
-async function processGrailedForm(item) {
+// Preferences for Grailed's chained selectors.
+// These were pulled from a live `grailed.com/sell/new` DOM dump via cdp-tools/inspect-grailed.js.
+const GRAILED_PREFS = {
+  categoryTriggerText: "Department / Category",
+  categoryOptionText: "Tops",
+  subcategoryTriggerText: "Sub-category",
+  subcategoryOptionText: "T-Shirts",
+  sizeTriggerText: "Size",
+  sizeOptionText: "XL",
+  designerText: "Vintage",
+  conditionText: ""
+};
+
+async function processGrailedForm(item, options = {}) {
+  const isDemo = options.demo || false;
+  console.log("[Second Skin] Starting Grailed listing for", item.id || "demo");
   await SECOND_SKIN.humanDelay(1500, 1500);
 
-  const titleEl = await SECOND_SKIN.waitFor('input[name="title"]');
-  const priceEl = await SECOND_SKIN.waitFor('input[name="price"]');
-  const descriptionEl = await SECOND_SKIN.waitFor('textarea[name="description"]');
+  const basicsOk = await fillBasicFields(item);
+  if (!basicsOk) {
+    console.warn("[Second Skin] Grailed basic fields not found — partial or no injection.");
+    return;
+  }
+
+  if (Array.isArray(item.tags) && item.tags.length > 0) {
+    const tagsOk = await fillTags(item.tags);
+    if (tagsOk) {
+      console.log("[Second Skin] Grailed tags injected:", item.tags.join(", "));
+    }
+  }
+
+  // Demo jobs keep images, sizing, category, designer, and condition manual (#32).
+  if (!isDemo) {
+    const imagesOk = await uploadImages(item);
+    if (imagesOk) {
+      console.log("[Second Skin] Grailed images injected for", item.id);
+    }
+
+    await chainCategoryAndDesigner();
+    await fillCondition();
+  }
+
+  if (item.id) {
+    await SECOND_SKIN.updatePlatformMeta(item.id, "grailed", "active");
+  }
+  SECOND_SKIN.clearJobMutex();
+  console.log("[Second Skin] Grailed form ready for review:", item.id || "demo");
+  console.log("[Second Skin] Listing stopped before publish — review and submit manually.");
+}
+
+async function fillBasicFields(item) {
+  const titleEl = await SECOND_SKIN.waitFor('input[name="title"], input[id*="title" i], input[placeholder*="title" i]', 5000);
+  const priceEl = await SECOND_SKIN.waitFor('input[name="price"], input[id*="price" i], input[placeholder*="price" i], input[type="number"]', 5000);
+  const descriptionEl = await SECOND_SKIN.waitFor('textarea[name="description"], textarea[id*="description" i], textarea[placeholder*="description" i]', 5000);
+
+  if (!titleEl || !priceEl || !descriptionEl) {
+    console.warn("[Second Skin] Missing one of title/price/description on Grailed.", {
+      title: !!titleEl,
+      price: !!priceEl,
+      description: !!descriptionEl
+    });
+    return false;
+  }
 
   const titleInjected = SECOND_SKIN.dispatchSyntheticInput(titleEl, item.title);
   const priceInjected = SECOND_SKIN.dispatchSyntheticInput(priceEl, item.price);
   const descriptionInjected = SECOND_SKIN.dispatchSyntheticInput(descriptionEl, item.description);
 
-  let imagesInjected = false;
-  if (item.images && item.images.length > 0) {
-    const fileInput = await SECOND_SKIN.waitFor('input[type="file"]', 3000);
-    if (fileInput) {
-      imagesInjected = await SECOND_SKIN.injectFiles(fileInput, item.images);
-    } else {
-      console.warn("[Second Skin] Grailed file input not found — images skipped.");
-    }
+  if (!titleInjected || !priceInjected || !descriptionInjected) {
+    return false;
   }
 
-  await chainCategoryAndDesigner();
+  // Trigger React re-renders by refocusing the body.
+  await SECOND_SKIN.humanDelay(200, 300);
+  document.body.dispatchEvent(new Event("click", { bubbles: true }));
+  return true;
+}
 
-  if (titleInjected && priceInjected && descriptionInjected) {
-    await SECOND_SKIN.updatePlatformMeta(item.id, "grailed", "active");
-    SECOND_SKIN.clearJobMutex();
-    console.log("[Second Skin] Grailed form fields injected for", item.id);
-    if (imagesInjected) console.log("[Second Skin] Grailed images injected for", item.id);
-  } else {
-    console.warn("[Second Skin] Grailed selectors not found — partial or no injection.");
+async function fillTags(tags) {
+  const input = await SECOND_SKIN.waitFor(
+    'input[name="tags" i], input[placeholder*="tag" i], input[aria-label*="tag" i], textarea[placeholder*="tag" i]',
+    3000
+  );
+  if (!input) {
+    console.warn("[Second Skin] Grailed tags input not found — tags skipped.");
+    return false;
   }
+
+  const tagString = tags.join(", ");
+  SECOND_SKIN.dispatchSyntheticInput(input, tagString);
+
+  // Grailed may require a keypress/blur to commit tag chips.
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+  input.blur();
+
+  return true;
+}
+
+async function uploadImages(item) {
+  if (!item.images || item.images.length === 0) return false;
+
+  const fileInput = await SECOND_SKIN.waitFor('input[type="file"]', 5000);
+  if (!fileInput) {
+    console.warn("[Second Skin] Grailed file input not found — images skipped.");
+    return false;
+  }
+
+  const files = item.images.map((dataUrl, idx) => {
+    const mime = dataUrl.match(/^data:([^;]+);base64,/)?.[1] || "image/jpeg";
+    const base64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
+    const ext = mime.split("/")[1] || "jpg";
+    return { name: `photo_${idx + 1}.${ext}`, mime, data: base64 };
+  });
+
+  return SECOND_SKIN.injectFiles(fileInput, files);
 }
 
 async function chainCategoryAndDesigner() {
-  // Grailed requires selecting Category → Subcategory → Designer in sequence.
-  // These selectors are platform-specific and should be refined against the live DOM.
-
-  const categoryEl = await SECOND_SKIN.waitFor('[data-testid="category-trigger"], button[aria-label*="Category"]', 3000);
-  if (categoryEl) {
-    categoryEl.click();
-    await SECOND_SKIN.humanDelay(300, 400);
-
-    const firstCategory = await SECOND_SKIN.waitFor('[data-testid="category-option"]:first-child, [role="option"]:first-child', 3000);
-    if (firstCategory) {
-      firstCategory.click();
-      await SECOND_SKIN.humanDelay(300, 400);
-    }
+  // 1. Department / Category
+  const categoryOk = await selectDropdownOption(
+    GRAILED_PREFS.categoryTriggerText,
+    GRAILED_PREFS.categoryOptionText
+  );
+  if (categoryOk) {
+    console.log("[Second Skin] Grailed category set to", GRAILED_PREFS.categoryOptionText);
+    await SECOND_SKIN.humanDelay(600, 800);
   }
 
-  const designerEl = await SECOND_SKIN.waitFor('[data-testid="designer-trigger"], input[placeholder*="designer" i]', 3000);
-  if (designerEl) {
-    if (designerEl.tagName === "INPUT") {
-      SECOND_SKIN.dispatchSyntheticInput(designerEl, "Vintage");
+  // 2. Subcategory (enabled only after category is selected).
+  const subcategoryOk = await selectDropdownOption(
+    GRAILED_PREFS.subcategoryTriggerText,
+    GRAILED_PREFS.subcategoryOptionText
+  );
+  if (subcategoryOk) {
+    console.log("[Second Skin] Grailed subcategory set to", GRAILED_PREFS.subcategoryOptionText);
+    await SECOND_SKIN.humanDelay(600, 800);
+  }
+
+  // 3. Size (Radix dropdown; enabled after category is selected).
+  if (GRAILED_PREFS.sizeOptionText) {
+    const sizeOk = await selectDropdownOption(
+      GRAILED_PREFS.sizeTriggerText,
+      GRAILED_PREFS.sizeOptionText
+    );
+    if (sizeOk) {
+      console.log("[Second Skin] Grailed size set to", GRAILED_PREFS.sizeOptionText);
       await SECOND_SKIN.humanDelay(400, 600);
-      const firstDesigner = await SECOND_SKIN.waitFor('[role="option"]:first-child', 2000);
-      if (firstDesigner) firstDesigner.click();
-    } else {
-      designerEl.click();
-      await SECOND_SKIN.humanDelay(300, 400);
-      const firstDesigner = await SECOND_SKIN.waitFor('[data-testid="designer-option"]:first-child, [role="option"]:first-child', 3000);
-      if (firstDesigner) firstDesigner.click();
     }
   }
+
+  // 4. Designer autocomplete (enabled after category is selected).
+  const designerInput = await SECOND_SKIN.waitForEnabled(
+    '#designer-autocomplete, input[placeholder*="designer" i], input[aria-label*="designer" i]',
+    5000
+  );
+  if (designerInput) {
+    const filled = await SECOND_SKIN.fillAutocomplete(designerInput, GRAILED_PREFS.designerText);
+    console.log("[Second Skin] Grailed designer", filled ? "set" : "not set", "to", GRAILED_PREFS.designerText);
+  } else {
+    console.warn("[Second Skin] Grailed designer input did not become enabled — category may not have committed.");
+  }
+}
+
+async function fillCondition() {
+  if (GRAILED_PREFS.conditionText) {
+    const conditionOk = await selectDropdownOption("Condition", GRAILED_PREFS.conditionText);
+    if (conditionOk) {
+      console.log("[Second Skin] Grailed condition set to", GRAILED_PREFS.conditionText);
+    }
+  }
+}
+
+// Click a visible trigger whose text contains `triggerText`, then pick the option
+// whose text contains `optionText`. Falls back to the first option if the target
+// text is not found.
+async function selectDropdownOption(triggerText, optionText) {
+  if (!triggerText || !optionText) return false;
+
+  const trigger = await findTriggerByText(triggerText);
+  if (!trigger) return false;
+
+  const specific = await SECOND_SKIN.selectRadixOption(trigger, optionText);
+  if (specific) return true;
+
+  // Fallback: open trigger and click the first available option.
+  trigger.click();
+  await SECOND_SKIN.humanDelay(300, 400);
+  const firstOption = await SECOND_SKIN.waitFor(
+    '[role="option"]:first-child, [role="menuitem"]:first-child, [data-testid*="option"]:first-child',
+    2000
+  );
+  if (firstOption) {
+    firstOption.click();
+    await SECOND_SKIN.humanDelay(200, 300);
+    return true;
+  }
+  return false;
+}
+
+async function findTriggerByText(text) {
+  const selectors = [
+    'button',
+    '[role="combobox"]',
+    '[role="button"]',
+    '[data-state="closed"]'
+  ];
+  const deadline = Date.now() + 3000;
+
+  while (Date.now() < deadline) {
+    for (const sel of selectors) {
+      const elements = document.querySelectorAll(sel);
+      for (const el of elements) {
+        const visible = !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+        const t = (el.textContent || "").toLowerCase();
+        const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+        const placeholder = (el.getAttribute("placeholder") || "").toLowerCase();
+        if (visible && (t.includes(text.toLowerCase()) || aria.includes(text.toLowerCase()) || placeholder.includes(text.toLowerCase()))) {
+          return el;
+        }
+      }
+    }
+    await SECOND_SKIN.humanDelay(300, 300);
+  }
+  return null;
 }

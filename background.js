@@ -111,7 +111,8 @@ async function handleAutofillGrailed(job) {
   const listingJob = {
     targetSite: "grailed",
     itemId,
-    demo: true
+    demo: true,
+    demoJob: item
   };
 
   await storageSet({ currentListingJob: listingJob });
