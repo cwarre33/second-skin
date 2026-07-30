@@ -31,10 +31,16 @@ export function useExtension() {
       return { ok: false, error: "Extension bridge not available" };
     }
 
+    if (!EXTENSION_ID) {
+      return {
+        ok: false,
+        error: "Extension ID not configured. Set NEXT_PUBLIC_EXTENSION_ID in demo/.env.local."
+      };
+    }
+
     return new Promise((resolve) => {
-      const target = EXTENSION_ID || undefined;
       window.chrome.runtime.sendMessage(
-        target,
+        EXTENSION_ID,
         { origin: DEMO_ORIGIN, ...message },
         (response) => {
           if (window.chrome.runtime.lastError) {

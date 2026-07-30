@@ -7,10 +7,19 @@
     "storage",
     "tabs"
   ],
+  "host_permissions": [
+    "http://localhost:11434/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "options_page": "dashboard.html",
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:3000/*",
+      "http://127.0.0.1:3000/*"
+    ]
+  },
   "content_scripts": [
     {
       "matches": ["*://*.depop.com/*"],

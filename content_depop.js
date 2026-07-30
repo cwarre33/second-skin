@@ -90,3 +90,57 @@ const observer = new MutationObserver(() => {
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
+
+// --- Demo bridge: parse active Depop listing ---
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.action !== "parseDepopListing") return false;
+
+  const data = parseActiveListing();
+  sendResponse({ ok: true, job: data });
+  return false;
+});
+
+function parseActiveListing() {
+  const titleEl =
+    document.querySelector('h1') ||
+    document.querySelector('[data-testid*="title" i]') ||
+    document.querySelector('[class*="title" i]');
+
+  const descriptionEl =
+    document.querySelector('[data-testid*="description" i]') ||
+    document.querySelector('.description p') ||
+    document.querySelector('p[class*="description" i]') ||
+    document.querySelector('meta[name="description"]');
+
+  const title = (titleEl?.textContent || titleEl?.content || "").trim();
+  const description = (descriptionEl?.textContent || descriptionEl?.content || "").trim();
+
+  // Simple tag extraction from the title/description and page meta keywords.
+  const metaKeywords = document.querySelector('meta[name="keywords"]');
+  const keywords = metaKeywords?.content || "";
+  const tags = Array.from(new Set([
+    ...keywords.split(/[,\s]+/).filter(Boolean),
+    ...extractFashionTokens(title),
+    ...extractFashionTokens(description)
+  ])).slice(0, 10);
+
+  return {
+    url: window.location.href,
+    title,
+    description,
+    tags
+  };
+}
+
+function extractFashionTokens(text) {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  const tokens = [];
+  const brands = ["nike", "adidas", "supreme", "levis", "vintage", "carhartt", "ralph lauren", "champion"];
+  const categories = ["tee", "t-shirt", "shirt", "jacket", "pants", "jeans", "shorts", "hoodie", "sweatshirt", "dress"];
+  for (const word of [...brands, ...categories]) {
+    if (lower.includes(word)) tokens.push(word);
+  }
+  return tokens;
+}

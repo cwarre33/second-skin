@@ -18,9 +18,13 @@ No signup required. Paste a Depop URL or enter title/description/tags manually, 
 
 ```bash
 cp .env.local.example .env.local
-# Edit .env.local and add your NVIDIA_API_KEY for real NIM calls in issue #8.
+# Edit .env.local and add:
+#   NVIDIA_API_KEY=...          (for real NIM calls in issue #8)
+#   NEXT_PUBLIC_EXTENSION_ID=... (Chrome extension ID for the bridge in issue #30)
 ```
 
 ## Extension bridge
 
 The page attempts to detect the Second Skin Chrome extension via `chrome.runtime.sendMessage`. The extension must declare this demo origin in `externally_connectable` (issue #30).
+
+Find your extension ID after loading the unpacked extension in `chrome://extensions` (Developer mode → Load unpacked), then set `NEXT_PUBLIC_EXTENSION_ID` in `demo/.env.local` and restart the dev server.
