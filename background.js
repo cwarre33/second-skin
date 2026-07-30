@@ -24,7 +24,8 @@ chrome.runtime.onInstalled.addListener(async () => {
 // Allowed web origins for the demo (issue #30).
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
-  "http://127.0.0.1:3000"
+  "http://127.0.0.1:3000",
+  "https://second-skin-zeta.vercel.app"
 ]);
 
 function storageSet(items) {
@@ -45,7 +46,10 @@ function isAllowedOrigin(url) {
 
 // Listen for messages from the demo web app.
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  console.log("[Second Skin] External message from", sender.url, "type:", message?.type);
+
   if (!isAllowedOrigin(sender.url)) {
+    console.warn("[Second Skin] Unauthorized origin:", sender.url);
     sendResponse({ ok: false, error: "Unauthorized origin" });
     return false;
   }

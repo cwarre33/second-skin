@@ -17,7 +17,7 @@ export default function Home() {
   const [copied, setCopied] = useState("");
 
   const { track } = useAnalytics();
-  const { status: extStatus, parseDepop, autofillGrailed } = useExtension();
+  const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed } = useExtension();
 
   const handleImprove = async () => {
     setError("");
@@ -120,6 +120,19 @@ export default function Home() {
         )}
         {extStatus === "unknown" && "Checking extension..."}
       </div>
+
+      {extError && extStatus !== "ready" && (
+        <div className={styles.error}>
+          {extError}
+          <button
+            className={styles.secondary}
+            onClick={retryExtension}
+            style={{ marginLeft: "0.75rem" }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {error && <div className={styles.error}>{error}</div>}
 

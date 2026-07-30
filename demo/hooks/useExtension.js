@@ -15,27 +15,31 @@ const DEMO_ORIGIN =
 export function useExtension() {
   const [status, setStatus] = useState("unknown");
 
+  const [lastError, setLastError] = useState("");
+
   useEffect(() => {
     if (typeof window === "undefined" || !window.chrome?.runtime?.sendMessage) {
       setStatus("missing");
       return;
     }
 
-    ping().then((ok) => setStatus(ok ? "ready" : "missing")).catch(() => {
+    ping().then((ok) => setStatus(ok ? "ready" : "missing")).catch((err) => {
+      setLastError(err?.message || "Ping failed");
       setStatus("missing");
     });
   }, []);
 
   const send = useCallback(async (message) => {
     if (typeof window === "undefined" || !window.chrome?.runtime?.sendMessage) {
-      return { ok: false, error: "Extension bridge not available" };
+      const err = "Extension bridge not available";
+      setLastError(err);
+      return { ok: false, error: err };
     }
 
     if (!EXTENSION_ID) {
-      return {
-        ok: false,
-        error: "Extension ID not configured. Set NEXT_PUBLIC_EXTENSION_ID in demo/.env.local."
-      };
+      const err = "Extension ID not configured. Set NEXT_PUBLIC_EXTENSION_ID in demo/.env.local.";
+      setLastError(err);
+      return { ok: false, error: err };
     }
 
     return new Promise((resolve) => {
@@ -44,11 +48,11 @@ export function useExtension() {
         { origin: DEMO_ORIGIN, ...message },
         (response) => {
           if (window.chrome.runtime.lastError) {
-            resolve({
-              ok: false,
-              error: window.chrome.runtime.lastError.message,
-            });
+            const err = window.chrome.runtime.lastError.message;
+            setLastError(err);
+            resolve({ ok: false, error: err });
           } else {
+            setLastError("");
             resolve(response || { ok: true });
           }
         }
@@ -71,5 +75,12 @@ export function useExtension() {
     [send]
   );
 
-  return { status, ping, send, parseDepop, autofillGrailed };
+  const retry = useCallback(async () => {
+    setStatus("unknown");
+    setLastError("");
+    const ok = await ping();
+    setStatus(ok ? "ready" : "missing");
+  }, [ping]);
+
+  return { status, lastError, ping, retry, send, parseDepop, autofillGrailed };
 }
