@@ -23,6 +23,7 @@ jobs:
           node --check content_grailed.js
           node --check background.js
           node --check shared.js
+          node --check ollama.js
 
       - name: Validate manifest.json
         run: node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest.json valid');"
