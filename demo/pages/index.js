@@ -11,13 +11,15 @@ export default function Home() {
   const [tags, setTags] = useState("");
   const [price, setPrice] = useState("");
   const [images, setImages] = useState([]);
+  const [measurements, setMeasurements] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
+  const [published, setPublished] = useState(null);
 
   const { track } = useAnalytics();
-  const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed } = useExtension();
+  const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed, publishDepop } = useExtension();
 
   // Prefill the form from query params sent by the extension popup or shared links.
   useEffect(() => {
@@ -30,6 +32,7 @@ export default function Home() {
     const paramTags = params.get("tags") || "";
     const paramPrice = params.get("price") || "";
     const paramImage = params.get("image") || "";
+    const paramMeasurements = params.get("measurements") || "";
 
     if (paramUrl) setUrl(paramUrl);
     if (paramTitle) setTitle(paramTitle);
@@ -37,6 +40,7 @@ export default function Home() {
     if (paramTags) setTags(paramTags);
     if (paramPrice) setPrice(paramPrice);
     if (paramImage) setImages([paramImage]);
+    if (paramMeasurements) setMeasurements(paramMeasurements);
 
     if (source) {
       track("prefill_from_query", { source });
@@ -101,10 +105,67 @@ export default function Home() {
     const response = await autofillGrailed(result);
     if (response?.ok) {
       track("autofill_grailed_succeeded");
+      setPublished("grailed");
     } else {
       setError(response?.error || "Could not autofill Grailed.");
       track("autofill_grailed_failed", { error: response?.error });
     }
+  };
+
+  const handlePublishDepop = async () => {
+    if (!title.trim()) return;
+    setError("");
+    setPublished(null);
+    track("publish_depop_clicked");
+
+    const job = buildJob();
+    const response = await publishDepop(job);
+    if (response?.ok) {
+      track("publish_depop_succeeded");
+      setPublished("depop");
+    } else {
+      setError(response?.error || "Could not publish to Depop.");
+      track("publish_depop_failed", { error: response?.error });
+    }
+  };
+
+  const buildJob = () => ({
+    title,
+    description: [description, measurements].filter(Boolean).join("\n\n"),
+    tags: tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
+    price,
+    images,
+  });
+
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const readers = files.map((file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(readers)
+      .then((dataUrls) => {
+        setImages((prev) => [...prev, ...dataUrls]);
+        track("images_uploaded", { count: dataUrls.length });
+      })
+      .catch((err) => {
+        console.error("[Second Skin] Image upload failed:", err);
+        setError("Failed to process one or more images.");
+      });
+  };
+
+  const removeImage = (idx) => {
+    setImages((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const copy = async (key, value) => {
@@ -124,7 +185,7 @@ export default function Home() {
     <div className={styles.container}>
       <header className={styles.header}>
         <h1>Second Skin</h1>
-        <p>Paste a Depop listing and improve it for Grailed.</p>
+        <p>Create once, publish everywhere. Start from scratch or import a Depop listing.</p>
       </header>
 
       <div className={`${styles.extensionStatus} ${statusClass}`}>
@@ -256,6 +317,43 @@ export default function Home() {
           />
           <p className={styles.hint}>Used when improving for market-specific pricing.</p>
         </div>
+        <div className={styles.field}>
+          <label htmlFor="measurements">Measurements (optional)</label>
+          <textarea
+            id="measurements"
+            value={measurements}
+            onChange={(e) => setMeasurements(e.target.value)}
+            placeholder="Pit to pit: 24in, Length: 29in, Shoulder: 19in..."
+          />
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="images">Photos (optional)</label>
+          <input
+            id="images"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleImageUpload}
+            className={styles.fileInput}
+          />
+          {images.length > 0 && (
+            <div className={styles.thumbnails}>
+              {images.map((src, i) => (
+                <div key={i} className={styles.thumbWrap}>
+                  <img src={src} alt={`Uploaded ${i + 1}`} />
+                  <button
+                    className={styles.removeThumb}
+                    onClick={() => removeImage(i)}
+                    title="Remove"
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <div className={styles.actions}>
           <button
             className={styles.primary}
@@ -306,15 +404,29 @@ export default function Home() {
             </div>
           ))}
 
-          <div className={styles.actions} style={{ marginTop: "1rem" }}>
+          <div className={`${styles.actions} ${styles.platformActions}`}>
             <button
               className={styles.primary}
               onClick={handleAutofillGrailed}
               disabled={extStatus !== "ready"}
             >
-              {extStatus === "ready" ? "Autofill Grailed" : "Install extension to autofill"}
+              {extStatus === "ready" ? "Publish to Grailed" : "Install extension to publish"}
+            </button>
+            <button
+              className={styles.secondary}
+              onClick={handlePublishDepop}
+              disabled={extStatus !== "ready" || !title.trim()}
+            >
+              {extStatus === "ready" ? "Publish to Depop" : "Install extension to publish"}
             </button>
           </div>
+          {published && (
+            <div className={styles.success}>
+              {published === "grailed"
+                ? "Opened Grailed with this listing. Review and submit there."
+                : "Opened Depop with this listing. Review and submit there."}
+            </div>
+          )}
         </section>
       )}
     </div>

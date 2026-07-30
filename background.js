@@ -77,7 +77,14 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     }
 
     if (type === "AUTOFILL_GRAILED") {
-      handleAutofillGrailed(message.job).then(sendResponse).catch((err) => {
+      handlePublish(message.job, "grailed").then(sendResponse).catch((err) => {
+        sendResponse({ ok: false, error: err.message });
+      });
+      return;
+    }
+
+    if (type === "PUBLISH_DEPOP") {
+      handlePublish(message.job, "depop").then(sendResponse).catch((err) => {
         sendResponse({ ok: false, error: err.message });
       });
       return;
@@ -106,7 +113,7 @@ async function handleParseDepop(url) {
   });
 }
 
-async function handleAutofillGrailed(job) {
+async function handlePublish(job, targetSite) {
   if (!job || !job.title) {
     return { ok: false, error: "Job missing required fields." };
   }
@@ -123,7 +130,7 @@ async function handleAutofillGrailed(job) {
   };
 
   const listingJob = {
-    targetSite: "grailed",
+    targetSite,
     itemId,
     demo: true,
     demoJob: item
@@ -135,12 +142,22 @@ async function handleAutofillGrailed(job) {
   inventory.push(item);
   await storageSet({ inventory });
 
-  const grailedUrl = "https://www.grailed.com/sell";
-  const grailedTabs = await chrome.tabs.query({ url: ["*://*.grailed.com/sell*"] });
-  if (grailedTabs.length > 0) {
-    await chrome.tabs.update(grailedTabs[0].id, { active: true });
-  } else {
-    await chrome.tabs.create({ url: grailedUrl });
+  if (targetSite === "grailed") {
+    const grailedUrl = "https://www.grailed.com/sell";
+    const grailedTabs = await chrome.tabs.query({ url: ["*://*.grailed.com/sell*"] });
+    if (grailedTabs.length > 0) {
+      await chrome.tabs.update(grailedTabs[0].id, { active: true });
+    } else {
+      await chrome.tabs.create({ url: grailedUrl });
+    }
+  } else if (targetSite === "depop") {
+    const depopUrl = "https://www.depop.com/products/create/";
+    const depopTabs = await chrome.tabs.query({ url: ["*://*.depop.com/products/create*"] });
+    if (depopTabs.length > 0) {
+      await chrome.tabs.update(depopTabs[0].id, { active: true });
+    } else {
+      await chrome.tabs.create({ url: depopUrl });
+    }
   }
 
   return { ok: true };

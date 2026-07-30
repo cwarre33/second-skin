@@ -5,19 +5,23 @@
     const job = state.currentListingJob;
     if (!job || job.targetSite !== "depop") return;
 
-    const activeItem = (state.inventory || []).find((item) => item.id === job.itemId);
+    const activeItem = job.demoJob
+      ? job.demoJob
+      : (state.inventory || []).find((item) => item.id === job.itemId);
     if (!activeItem) {
       SECOND_SKIN.clearJobMutex();
       return;
     }
 
     if (window.location.href.includes("/products/create")) {
-      processDepopForm(activeItem);
+      processDepopForm(activeItem, job.demoJob ? { demo: true } : {});
     }
   });
 })();
 
-async function processDepopForm(item) {
+async function processDepopForm(item, options = {}) {
+  const isDemo = options.demo || false;
+  console.log("[Second Skin] Starting Depop listing for", item.id || "demo");
   await SECOND_SKIN.humanDelay(1500, 1500);
 
   const unifiedBody = `${item.title}\n\n${item.description}`;
@@ -28,8 +32,13 @@ async function processDepopForm(item) {
   const descriptionInjected = SECOND_SKIN.dispatchSyntheticInput(descriptionEl, unifiedBody);
   const priceInjected = SECOND_SKIN.dispatchSyntheticInput(priceEl, item.price);
 
+  if (!descriptionInjected || !priceInjected) {
+    console.warn("[Second Skin] Depop basic fields not found — partial or no injection.");
+    return;
+  }
+
   let imagesInjected = false;
-  if (item.images && item.images.length > 0) {
+  if (!isDemo && item.images && item.images.length > 0) {
     const fileInput = await SECOND_SKIN.waitFor('input[type="file"]', 3000);
     if (fileInput) {
       imagesInjected = await SECOND_SKIN.injectFiles(fileInput, item.images);
@@ -38,14 +47,13 @@ async function processDepopForm(item) {
     }
   }
 
-  if (descriptionInjected && priceInjected) {
+  if (item.id) {
     await SECOND_SKIN.updatePlatformMeta(item.id, "depop", "active");
-    SECOND_SKIN.clearJobMutex();
-    console.log("[Second Skin] Depop form fields injected for", item.id);
-    if (imagesInjected) console.log("[Second Skin] Depop images injected for", item.id);
-  } else {
-    console.warn("[Second Skin] Depop selectors not found — partial or no injection.");
   }
+  SECOND_SKIN.clearJobMutex();
+  console.log("[Second Skin] Depop form ready for review:", item.id || "demo");
+  if (imagesInjected) console.log("[Second Skin] Depop images injected for", item.id);
+  console.log("[Second Skin] Listing stopped before publish — review and submit manually.");
 }
 
 // --- Passive profile scraper (sold-state detection) ---

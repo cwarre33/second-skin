@@ -75,6 +75,11 @@ export function useExtension() {
     [send]
   );
 
+  const publishDepop = useCallback(
+    async (job) => send({ type: "PUBLISH_DEPOP", job }),
+    [send]
+  );
+
   const retry = useCallback(async () => {
     setStatus("unknown");
     setLastError("");
@@ -82,5 +87,5 @@ export function useExtension() {
     setStatus(ok ? "ready" : "missing");
   }, [ping]);
 
-  return { status, lastError, ping, retry, send, parseDepop, autofillGrailed };
+  return { status, lastError, ping, retry, send, parseDepop, autofillGrailed, publishDepop };
 }
