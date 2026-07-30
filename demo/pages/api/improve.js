@@ -19,6 +19,43 @@ const RATE_WINDOW_MS = 60 * 1000;
 const RATE_MAX = 10;
 const rateBuckets = new Map();
 
+// Simple in-memory response cache keyed by normalized request hash.
+// TTL is intentionally short (2 minutes) to keep demo costs low without
+// serving stale listings for long. Production scaling → Redis / persistent cache.
+const CACHE_TTL_MS = 2 * 60 * 1000;
+const responseCache = new Map();
+
+function hashRequest(payload) {
+  const normalized = [
+    String(payload.platform || "grailed"),
+    String(payload.title || "").trim().toLowerCase(),
+    String(payload.description || "").trim().toLowerCase(),
+    (Array.isArray(payload.tags) ? payload.tags : String(payload.tags || "").split(/[,#\s]+/))
+      .map((t) => String(t).trim().toLowerCase())
+      .filter(Boolean)
+      .join(","),
+  ].join("|");
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i++) {
+    hash = ((hash << 5) - hash + normalized.charCodeAt(i)) | 0;
+  }
+  return String(hash);
+}
+
+function getCached(key) {
+  const entry = responseCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL_MS) {
+    responseCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCached(key, value) {
+  responseCache.set(key, { ts: Date.now(), value });
+}
+
 function isRateLimited(ip) {
   const now = Date.now();
   const bucket = (rateBuckets.get(ip) || []).filter(
@@ -54,8 +91,15 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: "NVIDIA_API_KEY is not configured." });
   }
 
+  const cacheKey = hashRequest({ platform, title, description, tags, price });
+  const cached = getCached(cacheKey);
+  if (cached) {
+    return res.status(200).json({ ...cached, cached: true });
+  }
+
   try {
     const improved = await improveWithNim({ platform, title, description, tags, price });
+    setCached(cacheKey, improved);
     return res.status(200).json(improved);
   } catch (err) {
     console.error("[/api/improve] NIM error:", err);
