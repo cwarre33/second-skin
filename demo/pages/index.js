@@ -3,6 +3,8 @@ import { improveListing } from "@/lib/api";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { useExtension } from "@/hooks/useExtension";
 import { useDraftAutosave } from "@/hooks/useDraftAutosave";
+import { usePublishLog } from "@/hooks/usePublishLog";
+import { PublishLog } from "@/components/PublishLog";
 import {
   CONDITION_OPTIONS,
   createListing,
@@ -73,7 +75,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
   const [published, setPublished] = useState(null);
-  const [publishLog, setPublishLog] = useState([]);
+  const { publishLog, logPublish, clearPublishLog } = usePublishLog();
 
   const { track } = useAnalytics();
   const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed, publishDepop } = useExtension();
@@ -587,23 +589,6 @@ export default function Home() {
     setSelectedIds(new Set());
   };
 
-  const logPublish = (item, platform, status, error = "") => {
-    setPublishLog((prev) => [
-      {
-        id: `${item.id}-${platform}-${Date.now()}`,
-        listingId: item.id,
-        title: item.title || "Untitled",
-        platform,
-        status,
-        error,
-        ts: Date.now(),
-      },
-      ...prev.slice(0, 49),
-    ]);
-  };
-
-  const clearPublishLog = () => setPublishLog([]);
-
   const publishedPlatforms = (item) =>
     Object.entries(item.platforms || {}).filter(
       ([, p]) => p.status === "published"
@@ -693,31 +678,7 @@ export default function Home() {
 
       {error && <div className={styles.error}>{error}</div>}
 
-      {publishLog.length > 0 && (
-        <section className={styles.card}>
-          <div className={styles.publishLogHeader}>
-            <h2>Publish log</h2>
-            <button className={styles.secondary} onClick={clearPublishLog}>Clear</button>
-          </div>
-          <ul className={styles.publishLog}>
-            {publishLog.map((entry) => (
-              <li
-                key={entry.id}
-                className={
-                  entry.status === "failed" ? styles.publishError : styles.publishSuccess
-                }
-              >
-                <strong>{entry.title}</strong>
-                {" — "}
-                {entry.platform} {entry.status === "published" ? "published" : "failed"}
-                {entry.error && (
-                  <span className={styles.publishErrorMsg}>: {entry.error}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <PublishLog entries={publishLog} onClear={clearPublishLog} />
 
       {extStatus === "missing" && (
         <section className={`${styles.card} ${styles.ctaCard}`}>
