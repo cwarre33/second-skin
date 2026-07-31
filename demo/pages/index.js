@@ -12,6 +12,12 @@ import {
   updateListingStatus,
 } from "@/lib/inventory";
 import { calculatePayouts, suggestListPrice, FEE_CONFIG } from "@/lib/fees";
+import {
+  applyTemplate,
+  createTemplate,
+  loadTemplates,
+  saveTemplates,
+} from "@/lib/templates";
 import styles from "@/styles/Home.module.css";
 
 const STATUS_LABEL = {
@@ -24,6 +30,8 @@ const STATUS_LABEL = {
 
 export default function Home() {
   const [inventory, setInventory] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [templateName, setTemplateName] = useState("");
   const [view, setView] = useState("list"); // 'list' | 'form'
   const [editingId, setEditingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -107,10 +115,11 @@ export default function Home() {
 
   const { clear: clearDraft } = useDraftAutosave(draftApi);
 
-  // Load inventory on mount.
+  // Load inventory and templates on mount.
   useEffect(() => {
     if (typeof window === "undefined") return;
     setInventory(loadInventory());
+    setTemplates(loadTemplates());
   }, []);
 
   // Persist inventory on change.
@@ -118,6 +127,12 @@ export default function Home() {
     if (typeof window === "undefined") return;
     saveInventory(inventory);
   }, [inventory]);
+
+  // Persist templates on change.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    saveTemplates(templates);
+  }, [templates]);
 
   // Prefill the form from query params sent by the extension popup or shared links.
   useEffect(() => {
@@ -236,6 +251,43 @@ export default function Home() {
       resetForm();
       setView("list");
     }
+  };
+
+  const saveTemplate = () => {
+    if (!templateName.trim()) {
+      setError("Template name is required.");
+      return;
+    }
+    const draft = {
+      condition,
+      flaws,
+      measurements,
+      tags,
+      optimizeFor,
+    };
+    const template = createTemplate(templateName, draft);
+    setTemplates((prev) => [template, ...prev]);
+    setTemplateName("");
+    track("template_saved", { id: template.id });
+  };
+
+  const applySelectedTemplate = (id) => {
+    const template = templates.find((t) => t.id === id);
+    if (!template) return;
+    applyTemplate(template, {
+      setCondition,
+      setFlaws,
+      setMeasurements,
+      setTags,
+      setOptimizeFor,
+    });
+    track("template_applied", { id });
+  };
+
+  const deleteTemplate = (id) => {
+    if (!confirm("Delete this template?")) return;
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    track("template_deleted", { id });
   };
 
   const setPlatformStatus = (id, platform, status, url = "") => {
@@ -899,6 +951,59 @@ export default function Home() {
                 )}
               </div>
             )}
+
+            <div className={styles.field}>
+              <label>Templates / brand defaults</label>
+              {templates.length > 0 && (
+                <div className={styles.templateRow}>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) applySelectedTemplate(e.target.value);
+                      e.target.value = "";
+                    }}
+                  >
+                    <option value="">— Apply a template —</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className={styles.templateSaveRow}>
+                <input
+                  type="text"
+                  placeholder="Template name (e.g. Vintage tees)"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                />
+                <button
+                  className={styles.secondary}
+                  onClick={saveTemplate}
+                  type="button"
+                >
+                  Save current as template
+                </button>
+              </div>
+              {templates.length > 0 && (
+                <ul className={styles.templateList}>
+                  {templates.map((t) => (
+                    <li key={t.id}>
+                      <span>{t.name}</span>
+                      <button
+                        className={styles.removeFlaw}
+                        onClick={() => deleteTemplate(t.id)}
+                        title="Delete template"
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <div className={styles.field}>
               <label htmlFor="images">Photos (optional)</label>
               <input

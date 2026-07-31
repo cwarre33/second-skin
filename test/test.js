@@ -292,6 +292,50 @@ test("suggestListPrice returns null for invalid target", () => {
   assert.strictEqual(FEES.suggestListPrice("50", "unknown"), null);
 });
 
+// Listing template tests.
+const TEMPLATES = require("../demo/lib/templates.js");
+
+test("createTemplate captures reusable fields", () => {
+  const draft = {
+    condition: "good",
+    flaws: [{ location: "hem", description: "small stain" }],
+    measurements: "P2P 22in",
+    tags: "vintage, tee",
+    optimizeFor: "grailed",
+  };
+  const t = TEMPLATES.createTemplate("Vintage tees", draft);
+  assert.strictEqual(t.name, "Vintage tees");
+  assert.strictEqual(t.fields.condition, "good");
+  assert.deepStrictEqual(t.fields.flaws, draft.flaws);
+  assert.strictEqual(t.fields.measurements, "P2P 22in");
+  assert.strictEqual(t.fields.tags, "vintage, tee");
+  assert.strictEqual(t.fields.optimizeFor, "grailed");
+});
+
+test("applyTemplate calls setters with stored values", () => {
+  const calls = {};
+  const setters = {
+    setCondition: (v) => (calls.setCondition = v),
+    setFlaws: (v) => (calls.setFlaws = v),
+    setMeasurements: (v) => (calls.setMeasurements = v),
+    setTags: (v) => (calls.setTags = v),
+    setOptimizeFor: (v) => (calls.setOptimizeFor = v),
+  };
+  const t = TEMPLATES.createTemplate("Tees", {
+    condition: "like_new",
+    flaws: [],
+    measurements: "L 30in",
+    tags: "90s, band",
+    optimizeFor: "depop",
+  });
+  TEMPLATES.applyTemplate(t, setters);
+  assert.strictEqual(calls.setCondition, "like_new");
+  assert.deepStrictEqual(calls.setFlaws, []);
+  assert.strictEqual(calls.setMeasurements, "L 30in");
+  assert.strictEqual(calls.setTags, "90s, band");
+  assert.strictEqual(calls.setOptimizeFor, "depop");
+});
+
 // Ollama listing parser tests (no network).
 const OLLAMA = require("../ollama.js");
 
