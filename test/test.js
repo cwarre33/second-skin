@@ -266,6 +266,73 @@ const FEES = require("../demo/lib/fees.js");
 // Inventory tests (#49 structured fields).
 const INVENTORY = require("../demo/lib/inventory.js");
 
+// Stale-listing alert tests (#53).
+const STALE = require("../demo/lib/stale.js");
+const NOW = new Date("2026-07-31T00:00:00Z");
+const isoDaysAgo = (d) => new Date(NOW.getTime() - d * 86400000).toISOString();
+
+test("ageDays returns 0 for empty or invalid timestamp", () => {
+  assert.strictEqual(STALE.ageDays("", NOW), 0);
+  assert.strictEqual(STALE.ageDays(null, NOW), 0);
+  assert.strictEqual(STALE.ageDays("not-a-date", NOW), 0);
+});
+
+test("ageDays computes whole days and clamps negatives to 0", () => {
+  assert.strictEqual(STALE.ageDays(isoDaysAgo(0), NOW), 0);
+  assert.strictEqual(STALE.ageDays(isoDaysAgo(1), NOW), 1);
+  assert.strictEqual(STALE.ageDays(isoDaysAgo(45), NOW), 45);
+  // Future timestamp (clock skew / fresh bump) must not go negative.
+  assert.strictEqual(STALE.ageDays(isoDaysAgo(-5), NOW), 0);
+});
+
+test("getStaleSuggestions is empty for draft and sold listings (#53)", () => {
+  const draft = INVENTORY.createListing({ title: "Tee" });
+  assert.deepStrictEqual(STALE.getStaleSuggestions(draft, NOW), []);
+  const sold = { ...draft, platforms: { grailed: { status: "sold", lastUpdated: isoDaysAgo(90) } } };
+  assert.deepStrictEqual(STALE.getStaleSuggestions(sold, NOW), []);
+});
+
+test("getStaleSuggestions returns refresh at 30+ days and price_drop at 60+ days", () => {
+  const make = (days) => ({
+    createdAt: isoDaysAgo(days),
+    platforms: { grailed: { status: "published", lastUpdated: isoDaysAgo(days) } },
+  });
+  // 29 days: quiet.
+  assert.deepStrictEqual(STALE.getStaleSuggestions(make(29), NOW), []);
+  // 30 days: refresh.
+  const r = STALE.getStaleSuggestions(make(30), NOW);
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].type, "refresh");
+  assert.strictEqual(r[0].platform, "grailed");
+  assert.strictEqual(r[0].age, 30);
+  // 60 days: price_drop.
+  const p = STALE.getStaleSuggestions(make(60), NOW);
+  assert.strictEqual(p.length, 1);
+  assert.strictEqual(p[0].type, "price_drop");
+  assert.strictEqual(p[0].age, 60);
+});
+
+test("getStaleSuggestions falls back to createdAt when lastUpdated is empty", () => {
+  const listing = {
+    createdAt: isoDaysAgo(35),
+    platforms: { depop: { status: "published", lastUpdated: "" } },
+  };
+  const s = STALE.getStaleSuggestions(listing, NOW);
+  assert.strictEqual(s.length, 1);
+  assert.strictEqual(s[0].type, "refresh");
+  assert.strictEqual(s[0].platform, "depop");
+});
+
+test("summarizeStale aggregates refresh and price_drop counts", () => {
+  const inventory = [
+    { createdAt: isoDaysAgo(30), platforms: { grailed: { status: "published", lastUpdated: isoDaysAgo(30) } } },
+    { createdAt: isoDaysAgo(70), platforms: { depop: { status: "active", lastUpdated: isoDaysAgo(70) } } },
+    { createdAt: isoDaysAgo(70), platforms: { grailed: { status: "published", lastUpdated: isoDaysAgo(70) } } },
+    { createdAt: isoDaysAgo(5), platforms: { grailed: { status: "published", lastUpdated: isoDaysAgo(5) } } },
+  ];
+  assert.deepStrictEqual(STALE.summarizeStale(inventory, NOW), { refresh: 1, price_drop: 2 });
+});
+
 test("createListing carries structured fields category/brand/size (#49)", () => {
   const listing = INVENTORY.createListing({
     title: "Vintage tee",

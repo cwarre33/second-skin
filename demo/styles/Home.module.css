@@ -382,6 +382,32 @@
   border-color: #86efac;
 }
 
+/* Stale-listing alerts (#53). */
+.staleBanner {
+  border-left: 4px solid #f59e0b;
+}
+.staleBanner h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+.staleAlert {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  margin-top: 0.4rem;
+  border: 1px solid;
+}
+.staleRefresh {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+.stalePriceDrop {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
 .inventoryActions {
   display: flex;
   gap: 0.5rem;

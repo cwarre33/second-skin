@@ -13,6 +13,7 @@ import {
   saveInventory,
   updateListingStatus,
 } from "@/lib/inventory";
+import { getStaleSuggestions, summarizeStale } from "@/lib/stale";
 import { calculatePayouts, suggestListPrice, FEE_CONFIG } from "@/lib/fees";
 import {
   applyTemplate,
@@ -684,6 +685,12 @@ export default function Home() {
       ? styles.missing
       : styles.unknown;
 
+  // Stale-listing summary banner (#53). Recomputed when inventory changes.
+  const staleSummary = useMemo(
+    () => summarizeStale(inventory),
+    [inventory]
+  );
+
   return (
     <div className={styles.container}>
       <header className={styles.header}>
@@ -769,6 +776,24 @@ export default function Home() {
             </section>
           ) : (
             <>
+              {(staleSummary.refresh > 0 || staleSummary.price_drop > 0) && (
+                <section className={`${styles.card} ${styles.staleBanner}`}>
+                  <h3>📣 Refresh suggestions</h3>
+                  <p className={styles.hint}>
+                    {staleSummary.refresh > 0 && (
+                      <span className={styles.staleRefresh}>
+                        {staleSummary.refresh} listing{staleSummary.refresh > 1 ? "s" : ""} need a refresh (30+ days live).
+                      </span>
+                    )}{" "}
+                    {staleSummary.price_drop > 0 && (
+                      <span className={styles.stalePriceDrop}>
+                        {staleSummary.price_drop} listing{staleSummary.price_drop > 1 ? "s" : ""} may need a price drop (60+ days live).
+                      </span>
+                    )}{" "}
+                    Bump, relist, or drop the price to restore visibility.
+                  </p>
+                </section>
+              )}
               <section className={styles.card}>
                 <div className={styles.bulkBar}>
                   <label className={styles.selectAll}>
@@ -852,6 +877,15 @@ export default function Home() {
                           Depop: {STATUS_LABEL[item.platforms?.depop?.status] || "Draft"}
                         </span>
                       </div>
+                      {getStaleSuggestions(item).map((s, i) => (
+                        <div
+                          key={`${item.id}-stale-${i}`}
+                          className={`${styles.staleAlert} ${s.type === "price_drop" ? styles.stalePriceDrop : styles.staleRefresh}`}
+                          title={s.label}
+                        >
+                          {s.label}
+                        </div>
+                      ))}
                       <div className={styles.inventoryActions}>
                         <button className={styles.secondary} onClick={() => loadIntoForm(item)}>Edit / Publish</button>
                         {publishedPlatforms(item).length > 0 && (
