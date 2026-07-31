@@ -294,3 +294,194 @@ async function findTriggerByText(text) {
   }
   return null;
 }
+
+// --- Demo bridge: parse active Grailed listing (#48) ---
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.action !== "parseGrailedListing") return false;
+
+  // Grailed is an SPA; wait briefly for the title to hydrate before reading.
+  parseGrailedListingAsync()
+    .then((data) => sendResponse({ ok: true, job: data }))
+    .catch((err) => sendResponse({ ok: false, error: err.message || "Failed to parse Grailed listing." }));
+  return true;
+});
+
+async function parseGrailedListingAsync() {
+  await SECOND_SKIN.waitFor("h1, [data-testid*='title' i], [class*='title' i]", 2500);
+  return parseActiveGrailedListing();
+}
+
+function parseActiveGrailedListing() {
+  const ld = extractJsonLdProduct();
+
+  const title = pickText([
+    "h1",
+    "[data-testid*='title' i]",
+    "meta[property='og:title']",
+    "meta[name='twitter:title']",
+  ]) || ld.name || "";
+
+  const description = pickText([
+    "[data-testid*='description' i]",
+    "[class*='description' i]",
+    ".listing-description",
+    "meta[property='og:description']",
+    "meta[name='description']",
+  ]) || ld.description || "";
+
+  const priceRaw =
+    pickText([
+      "meta[property='product:price:amount']",
+      "[data-testid*='price' i]",
+      "[class*='price' i]",
+    ]) || (ld.offers && ld.offers.price ? String(ld.offers.price) : "") || "";
+  const price = priceRaw.replace(/[^\d.,]/g, "");
+
+  const brand =
+    ld.brand || pickText([
+      "[data-testid*='designer' i]",
+      "[class*='designer' i]",
+      "meta[property='product:brand']",
+    ]);
+
+  const category =
+    ld.category || pickText([
+      "[data-testid*='category' i]",
+      "[class*='category' i]",
+    ]);
+
+  const size =
+    ld.size || pickText([
+      "[data-testid*='size' i]",
+      "[class*='size' i]",
+    ]);
+
+  const condition =
+    ld.itemCondition || ld.condition || pickText([
+      "[data-testid*='condition' i]",
+      "[class*='condition' i]",
+    ]);
+
+  const images = pickImages();
+  const tags = dedupeAndTrim(
+    [...extractFashionTokens(title), ...extractFashionTokens(description)],
+    10
+  );
+
+  return {
+    url: window.location.href,
+    title,
+    description,
+    price,
+    images,
+    tags,
+    brand: brand || "",
+    category: category || "",
+    size: size || "",
+    condition: normalizeCondition(condition),
+  };
+}
+
+// Grailed uses Schema.org condition URLs (e.g. https://schema.org/NewCondition).
+// Map those (and any raw label) onto our condition vocabulary where possible.
+function normalizeCondition(raw) {
+  if (!raw) return "";
+  const s = String(raw).toLowerCase();
+  // Check more-specific patterns before the bare "new" substring, so
+  // "Like New" / LikeNewCondition don't collapse to "new".
+  if (s.includes("like new") || s.includes("very good") || s.includes("excellent")) return "like_new";
+  if (s.includes("new")) return "new";
+  if (s.includes("fair") || s.includes("poor") || s.includes("worn")) return "fair";
+  if (s.includes("distressed") || s.includes("heavily")) return "distressed";
+  if (s.includes("good") || s.includes("used")) return "good";
+  return "";
+}
+
+function pickText(selectors) {
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const text = (el.textContent || el.content || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function pickImages() {
+  const urls = new Set();
+  document.querySelectorAll('meta[property="og:image"], meta[property="og:image:secure_url"]').forEach((m) => {
+    const url = m.getAttribute("content");
+    if (url) urls.add(resolveUrl(url));
+  });
+  document.querySelectorAll("img").forEach((img) => {
+    const src = img.getAttribute("data-src") || img.getAttribute("src");
+    if (!src) return;
+    const absolute = resolveUrl(src);
+    if (absolute.match(/\.(svg|png|ico)(\?|$)/i) && !absolute.match(/grailed|cdn/i)) return;
+    if (absolute.match(/avatar|profile|placeholder/i)) return;
+    if (img.naturalWidth && img.naturalHeight && (img.naturalWidth < 100 || img.naturalHeight < 100)) return;
+    urls.add(absolute);
+  });
+  return Array.from(urls).slice(0, 8);
+}
+
+function resolveUrl(src) {
+  try {
+    return new URL(src, window.location.href).href;
+  } catch {
+    return src;
+  }
+}
+
+// Best-effort JSON-LD Product extraction. Grailed embeds Schema.org Product
+// data on listing pages; fall back to "" for any missing field.
+function extractJsonLdProduct() {
+  const out = { name: "", description: "", brand: "", category: "", size: "", itemCondition: "", offers: null };
+  try {
+    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+    for (const script of scripts) {
+      let data;
+      try {
+        data = JSON.parse(script.textContent || "");
+      } catch {
+        continue;
+      }
+      const items = Array.isArray(data) ? data : [data];
+      for (const item of items) {
+        if (item && /product/i.test(item["@type"] || "")) {
+          out.name = item.name || out.name;
+          out.description = item.description || out.description;
+          out.category = item.category || out.category;
+          out.size = item.size || out.size;
+          out.itemCondition = item.itemCondition || out.condition || out.itemCondition;
+          if (item.brand) out.brand = typeof item.brand === "string" ? item.brand : (item.brand.name || "");
+          if (item.offers) out.offers = item.offers;
+        }
+      }
+    }
+  } catch {
+    // ignore — fall back to DOM/meta selectors
+  }
+  return out;
+}
+
+function extractFashionTokens(text) {
+  if (!text) return [];
+  const lower = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
+  const tokens = [];
+  const keywords = [
+    "nike", "adidas", "supreme", "levis", "carhartt", "champion", "ralph lauren",
+    "vintage", "retro", "y2k", "streetwear", "rare", "deadstock",
+    "tee", "t-shirt", "tshirt", "shirt", "jacket", "pants", "jeans", "shorts",
+    "hoodie", "sweatshirt", "dress", "sweater", "coat", "flannel"
+  ];
+  for (const word of keywords) {
+    if (lower.includes(word)) tokens.push(word);
+  }
+  return tokens;
+}
+
+function dedupeAndTrim(items, limit) {
+  return Array.from(new Set(items.map((s) => String(s).trim().toLowerCase()).filter(Boolean))).slice(0, limit);
+}

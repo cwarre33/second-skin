@@ -182,8 +182,12 @@ export default function Home() {
     const paramPrice = params.get("price") || "";
     const paramImage = params.get("image") || "";
     const paramMeasurements = params.get("measurements") || "";
+    const paramBrand = params.get("brand") || "";
+    const paramCategory = params.get("category") || "";
+    const paramSize = params.get("size") || "";
+    const paramCondition = params.get("condition") || "";
 
-    if (paramUrl || paramTitle || paramDescription || paramTags || paramPrice || paramImage || paramMeasurements) {
+    if (paramUrl || paramTitle || paramDescription || paramTags || paramPrice || paramImage || paramMeasurements || paramBrand || paramCategory || paramSize || paramCondition) {
       setView("form");
     }
 
@@ -194,6 +198,10 @@ export default function Home() {
     if (paramPrice) setPrice(paramPrice);
     if (paramImage) setImages([paramImage]);
     if (paramMeasurements) setMeasurements(paramMeasurements);
+    if (paramBrand) setBrand(paramBrand);
+    if (paramCategory) setCategory(paramCategory);
+    if (paramSize) setSize(paramSize);
+    if (paramCondition) setCondition(paramCondition);
 
     if (source) {
       track("prefill_from_query", { source });
