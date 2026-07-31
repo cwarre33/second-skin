@@ -260,6 +260,105 @@ test("fillAutocomplete returns false when input is null", async () => {
   assert.strictEqual(result, false);
 });
 
+// Fee / payout calculator tests.
+const FEES = require("../demo/lib/fees.js");
+
+test("calculatePayouts returns null for empty price", () => {
+  assert.strictEqual(FEES.calculatePayouts(""), null);
+  assert.strictEqual(FEES.calculatePayouts("abc"), null);
+});
+
+test("calculatePayouts computes Depop, Grailed, and Poshmark nets", () => {
+  const out = FEES.calculatePayouts("100");
+  assert.ok(out, "should return payouts");
+  assert.strictEqual(out.price, 100);
+  assert.strictEqual(typeof out.depop.net, "number");
+  assert.strictEqual(typeof out.grailed.net, "number");
+  assert.strictEqual(typeof out.poshmark.net, "number");
+  assert.ok(out.depop.net < 100, "Depop net should be less than list price");
+  assert.ok(out.grailed.net < 100, "Grailed net should be less than list price");
+  assert.ok(out.poshmark.net < 100, "Poshmark net should be less than list price");
+});
+
+test("suggestListPrice inverts Grailed fee schedule", () => {
+  const suggestion = FEES.suggestListPrice("80", "grailed");
+  assert.ok(suggestion, "should return a suggestion");
+  assert.ok(suggestion.listPrice >= 80, "list price should cover target net");
+  assert.ok(suggestion.payout.net >= 80, "resulting net should meet target");
+});
+
+test("suggestListPrice returns null for invalid target", () => {
+  assert.strictEqual(FEES.suggestListPrice("", "grailed"), null);
+  assert.strictEqual(FEES.suggestListPrice("50", "unknown"), null);
+});
+
+// Listing template tests.
+const TEMPLATES = require("../demo/lib/templates.js");
+
+test("createTemplate captures reusable fields", () => {
+  const draft = {
+    condition: "good",
+    flaws: [{ location: "hem", description: "small stain" }],
+    measurements: "P2P 22in",
+    tags: "vintage, tee",
+    optimizeFor: "grailed",
+  };
+  const t = TEMPLATES.createTemplate("Vintage tees", draft);
+  assert.strictEqual(t.name, "Vintage tees");
+  assert.strictEqual(t.fields.condition, "good");
+  assert.deepStrictEqual(t.fields.flaws, draft.flaws);
+  assert.strictEqual(t.fields.measurements, "P2P 22in");
+  assert.strictEqual(t.fields.tags, "vintage, tee");
+  assert.strictEqual(t.fields.optimizeFor, "grailed");
+});
+
+test("applyTemplate calls setters with stored values", () => {
+  const calls = {};
+  const setters = {
+    setCondition: (v) => (calls.setCondition = v),
+    setFlaws: (v) => (calls.setFlaws = v),
+    setMeasurements: (v) => (calls.setMeasurements = v),
+    setTags: (v) => (calls.setTags = v),
+    setOptimizeFor: (v) => (calls.setOptimizeFor = v),
+  };
+  const t = TEMPLATES.createTemplate("Tees", {
+    condition: "like_new",
+    flaws: [],
+    measurements: "L 30in",
+    tags: "90s, band",
+    optimizeFor: "depop",
+  });
+  TEMPLATES.applyTemplate(t, setters);
+  assert.strictEqual(calls.setCondition, "like_new");
+  assert.deepStrictEqual(calls.setFlaws, []);
+  assert.strictEqual(calls.setMeasurements, "L 30in");
+  assert.strictEqual(calls.setTags, "90s, band");
+  assert.strictEqual(calls.setOptimizeFor, "depop");
+});
+
+// Measurement template tests.
+const MEASUREMENTS = require("../demo/lib/measurements.js");
+
+test("formatMeasurements returns empty for empty values", () => {
+  assert.strictEqual(MEASUREMENTS.formatMeasurements("top", {}), "");
+});
+
+test("formatMeasurements formats top fields", () => {
+  const out = MEASUREMENTS.formatMeasurements("top", {
+    pit_to_pit: "22in",
+    length: "28in",
+    shoulder: "19in",
+  });
+  assert.strictEqual(
+    out,
+    "Pit to pit: 22in, Length: 28in, Shoulder: 19in"
+  );
+});
+
+test("drawMeasurementOverlay returns null outside browser", () => {
+  assert.strictEqual(MEASUREMENTS.drawMeasurementOverlay("top", { pit_to_pit: "22in" }), null);
+});
+
 // Ollama listing parser tests (no network).
 const OLLAMA = require("../ollama.js");
 

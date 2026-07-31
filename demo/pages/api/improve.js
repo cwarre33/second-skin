@@ -5,7 +5,7 @@
  * NVIDIA_API_KEY is server-side only (issue #8).
  *
  * Body: { platform, title, description, tags? }
- * Response: { title, description, tags }
+ * Response: { title, description, tags, platform }
  */
 
 const NIM_URL =
@@ -25,7 +25,32 @@ const rateBuckets = new Map();
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const responseCache = new Map();
 
+const PLATFORM_PROMPTS = {
+  depop: {
+    name: "Depop",
+    titleRules: "- title: under 40 characters, trendy/casual, include era or vibe if known.",
+    descriptionRules: "- description: 1-2 short sentences, mention fit, fabric, and condition. Keep it casual and scroll-stopping.",
+    tagRules: "- tags: exactly 5 lowercase single-word tags, no hashtags. Include brand, item type, and 2 style tags.",
+  },
+  grailed: {
+    name: "Grailed",
+    titleRules: "- title: under 60 characters, specific, includes brand/era/color/size if known.",
+    descriptionRules: "- description: 2-4 sentences, mention fit, fabric, condition, and style. Use menswear/spec-head language.",
+    tagRules: "- tags: 5-10 relevant lowercase tags, no hashtags. Include brand, era, silhouette, material.",
+  },
+  poshmark: {
+    name: "Poshmark",
+    titleRules: "- title: under 80 characters, front-load keywords (brand + item + style).",
+    descriptionRules: "- description: 3-5 friendly sentences. Mention condition, fit, and invite offers/bundles.",
+    tagRules: "- tags: 3 hashtags at the end of the description (e.g. #nike #athleisure #poshmark). Return them as the tags array.",
+  },
+};
+
 function hashRequest(payload) {
+  const flaws = Array.isArray(payload.flaws) ? payload.flaws : [];
+  const flawHash = flaws
+    .map((f) => `${String(f.location || "").trim().toLowerCase()}:${String(f.description || "").trim().toLowerCase()}`)
+    .join(";");
   const normalized = [
     String(payload.platform || "grailed"),
     String(payload.title || "").trim().toLowerCase(),
@@ -34,6 +59,8 @@ function hashRequest(payload) {
       .map((t) => String(t).trim().toLowerCase())
       .filter(Boolean)
       .join(","),
+    String(payload.condition || "").trim().toLowerCase(),
+    flawHash,
   ].join("|");
   let hash = 0;
   for (let i = 0; i < normalized.length; i++) {
@@ -81,7 +108,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "Rate limit exceeded. Try again in a minute." });
   }
 
-  const { platform = "grailed", title = "", description = "", tags = [], price = "" } = req.body || {};
+  const { platform = "grailed", title = "", description = "", tags = [], price = "", condition = "", flaws = [] } = req.body || {};
 
   if (!title.trim() && !description.trim()) {
     return res.status(400).json({ error: "Provide a title or description." });
@@ -91,14 +118,14 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: "NVIDIA_API_KEY is not configured." });
   }
 
-  const cacheKey = hashRequest({ platform, title, description, tags, price });
+  const cacheKey = hashRequest({ platform, title, description, tags, price, condition, flaws });
   const cached = getCached(cacheKey);
   if (cached) {
     return res.status(200).json({ ...cached, cached: true });
   }
 
   try {
-    const improved = await improveWithNim({ platform, title, description, tags, price });
+    const improved = await improveWithNim({ platform, title, description, tags, price, condition, flaws });
     setCached(cacheKey, improved);
     return res.status(200).json(improved);
   } catch (err) {
@@ -109,19 +136,31 @@ export default async function handler(req, res) {
   }
 }
 
-async function improveWithNim({ platform, title, description, tags, price }) {
+async function improveWithNim({ platform, title, description, tags, price, condition, flaws }) {
   const existingTags = Array.isArray(tags) ? tags.join(", ") : String(tags || "");
+  const rules = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.grailed;
+
+  const flawText = (flaws || [])
+    .filter((f) => f.location?.trim() || f.description?.trim())
+    .map((f) => {
+      const loc = f.location?.trim();
+      const desc = f.description?.trim();
+      if (loc && desc) return `${loc}: ${desc}`;
+      return loc || desc;
+    })
+    .join("; ");
 
   const prompt = [
-    `You are a fashion resale expert optimizing a listing for ${platform}.`,
+    `You are a fashion resale expert optimizing a listing for ${rules.name}.`,
     "Given the draft below, return an improved listing as a single JSON object:",
     '{"title":"...","description":"...","tags":["...","..."]}',
     "",
     "Rules:",
-    "- title: under 60 characters, specific, includes brand/era/color/size if known.",
-    "- description: 2-4 sentences, mention fit, fabric, condition, and style.",
-    "- tags: 5-10 relevant lowercase tags. No hashtags.",
+    rules.titleRules,
+    rules.descriptionRules,
+    rules.tagRules,
     price ? "- price context (do NOT return price): " + price : "",
+    condition ? "- condition context (do NOT return condition separately): " + condition + (flawText ? "; flaws: " + flawText : "") : "",
     "- Return ONLY the JSON object, no markdown, no explanation.",
     "",
     "Draft title:", title || "(none)",

@@ -30,6 +30,8 @@ export function createListing(draft = {}) {
     tags: draft.tags || [],
     price: draft.price || "",
     measurements: draft.measurements || "",
+    condition: draft.condition || "",
+    flaws: draft.flaws || [],
     images: draft.images || [],
     url: draft.url || "",
     platforms: {
@@ -54,6 +56,38 @@ export function updateListingStatus(listing, platform, status, url = "") {
     },
     updatedAt: new Date().toISOString(),
   };
+}
+
+export const CONDITION_OPTIONS = [
+  { value: "new", label: "New with tags" },
+  { value: "like_new", label: "Like new" },
+  { value: "good", label: "Good" },
+  { value: "fair", label: "Fair" },
+  { value: "distressed", label: "Distressed" },
+];
+
+export function formatCondition(condition, flaws = []) {
+  const label = CONDITION_OPTIONS.find((o) => o.value === condition)?.label;
+  if (!label) return "";
+
+  const flawText = flaws
+    .filter((f) => f.location?.trim() || f.description?.trim())
+    .map((f) => {
+      const loc = f.location?.trim();
+      const desc = f.description?.trim();
+      if (loc && desc) return `${loc}: ${desc}`;
+      return loc || desc;
+    });
+
+  if (flawText.length === 0) {
+    return `${label} condition.`;
+  }
+
+  const flawSentence = flawText.length === 1
+    ? flawText[0]
+    : flawText.slice(0, -1).join("; ") + "; and " + flawText.slice(-1)[0];
+
+  return `${label} condition. Note: ${flawSentence}.`;
 }
 
 function generateId() {

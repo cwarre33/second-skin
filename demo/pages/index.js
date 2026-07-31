@@ -1,13 +1,28 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { improveListing } from "@/lib/api";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { useExtension } from "@/hooks/useExtension";
+import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import {
+  CONDITION_OPTIONS,
   createListing,
+  formatCondition,
   loadInventory,
   saveInventory,
   updateListingStatus,
 } from "@/lib/inventory";
+import { calculatePayouts, suggestListPrice, FEE_CONFIG } from "@/lib/fees";
+import {
+  applyTemplate,
+  createTemplate,
+  loadTemplates,
+  saveTemplates,
+} from "@/lib/templates";
+import {
+  drawMeasurementOverlay,
+  formatMeasurements,
+  MEASUREMENT_CATEGORIES,
+} from "@/lib/measurements";
 import styles from "@/styles/Home.module.css";
 
 const STATUS_LABEL = {
@@ -15,10 +30,25 @@ const STATUS_LABEL = {
   publishing: "Publishing...",
   published: "Needs review",
   review: "Needs review",
+  sold: "Sold",
+};
+
+const SAMPLE_LISTING = {
+  title: "Vintage NIN ‘Pretty Hate Machine’ Tee",
+  description:
+    "Single-stitch black tee from the 1990 Pretty Hate Machine era. Soft cotton with a faded front print. Great vintage condition with light wear consistent with age.",
+  tags: "vintage, band tee, nine inch nails, 90s, single stitch",
+  price: "85",
+  measurements: "Pit to pit: 22in, Length: 28in, Shoulder: 19in",
+  condition: "good",
+  flaws: [{ location: "print", description: "slight fading" }],
+  optimizeFor: "grailed",
 };
 
 export default function Home() {
   const [inventory, setInventory] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [templateName, setTemplateName] = useState("");
   const [view, setView] = useState("list"); // 'list' | 'form'
   const [editingId, setEditingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -32,19 +62,83 @@ export default function Home() {
   const [images, setImages] = useState([]);
   const [draggingIdx, setDraggingIdx] = useState(null);
   const [measurements, setMeasurements] = useState("");
+  const [measurementCategory, setMeasurementCategory] = useState("");
+  const [measurementValues, setMeasurementValues] = useState({});
+  const [condition, setCondition] = useState("");
+  const [flaws, setFlaws] = useState([]);
+  const [targetNet, setTargetNet] = useState("");
+  const [optimizeFor, setOptimizeFor] = useState("grailed");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
   const [published, setPublished] = useState(null);
+  const [publishLog, setPublishLog] = useState([]);
 
   const { track } = useAnalytics();
   const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed, publishDepop } = useExtension();
 
-  // Load inventory on mount.
+  // Autosave restoration happens once on mount.
+  const restoreDraft = useCallback((saved) => {
+    if (saved.url !== undefined) setUrl(saved.url);
+    if (saved.title !== undefined) setTitle(saved.title);
+    if (saved.description !== undefined) setDescription(saved.description);
+    if (saved.tags !== undefined) setTags(saved.tags);
+    if (saved.price !== undefined) setPrice(saved.price);
+    if (saved.measurements !== undefined) setMeasurements(saved.measurements);
+    if (saved.condition !== undefined) setCondition(saved.condition);
+    if (saved.flaws !== undefined) setFlaws(saved.flaws);
+    if (saved.targetNet !== undefined) setTargetNet(saved.targetNet);
+    if (saved.optimizeFor !== undefined) setOptimizeFor(saved.optimizeFor);
+    if (saved.images && saved.images.length > 0) setImages(saved.images);
+    if (saved.title?.trim() || saved.description?.trim()) {
+      setView("form");
+    }
+  }, []);
+
+  const draftSnapshot = useMemo(
+    () => ({
+      url,
+      title,
+      description,
+      tags,
+      price,
+      measurements,
+      condition,
+      flaws,
+      targetNet,
+      optimizeFor,
+      images,
+    }),
+    [url, title, description, tags, price, measurements, condition, flaws, targetNet, optimizeFor, images]
+  );
+
+  const draftApi = useMemo(
+    () => ({
+      snapshot: () => draftSnapshot,
+      hasContent: () =>
+        title.trim() ||
+        description.trim() ||
+        tags.trim() ||
+        price.trim() ||
+        measurements.trim() ||
+        condition ||
+        flaws.length > 0 ||
+        url.trim() ||
+        optimizeFor !== "grailed" ||
+        images.length > 0,
+      restore: restoreDraft,
+    }),
+    [draftSnapshot, title, description, tags, price, measurements, condition, flaws, url, optimizeFor, images, restoreDraft]
+  );
+
+  const { clear: clearDraft } = useDraftAutosave(draftApi);
+
+  // Load inventory and templates on mount.
   useEffect(() => {
     if (typeof window === "undefined") return;
     setInventory(loadInventory());
+    setTemplates(loadTemplates());
   }, []);
 
   // Persist inventory on change.
@@ -52,6 +146,12 @@ export default function Home() {
     if (typeof window === "undefined") return;
     saveInventory(inventory);
   }, [inventory]);
+
+  // Persist templates on change.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    saveTemplates(templates);
+  }, [templates]);
 
   // Prefill the form from query params sent by the extension popup or shared links.
   useEffect(() => {
@@ -92,15 +192,34 @@ export default function Home() {
     setPrice("");
     setImages([]);
     setMeasurements("");
+    setCondition("");
+    setFlaws([]);
+    setTargetNet("");
+    setOptimizeFor("grailed");
     setResult(null);
     setError("");
     setPublished(null);
+    clearDraft();
   };
 
   const startNew = () => {
     resetForm();
     setView("form");
     track("create_new_listing");
+  };
+
+  const loadSample = () => {
+    resetForm();
+    setTitle(SAMPLE_LISTING.title);
+    setDescription(SAMPLE_LISTING.description);
+    setTags(SAMPLE_LISTING.tags);
+    setPrice(SAMPLE_LISTING.price);
+    setMeasurements(SAMPLE_LISTING.measurements);
+    setCondition(SAMPLE_LISTING.condition);
+    setFlaws(SAMPLE_LISTING.flaws);
+    setOptimizeFor(SAMPLE_LISTING.optimizeFor);
+    setView("form");
+    track("sample_listing_loaded");
   };
 
   const loadIntoForm = (listing) => {
@@ -112,6 +231,8 @@ export default function Home() {
     setPrice(String(listing.price || ""));
     setImages(listing.images || []);
     setMeasurements(listing.measurements || "");
+    setCondition(listing.condition || "");
+    setFlaws(listing.flaws || []);
     setResult(null);
     setError("");
     setPublished(null);
@@ -133,6 +254,8 @@ export default function Home() {
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       price,
       measurements,
+      condition,
+      flaws,
       images,
     };
 
@@ -163,6 +286,43 @@ export default function Home() {
     }
   };
 
+  const saveTemplate = () => {
+    if (!templateName.trim()) {
+      setError("Template name is required.");
+      return;
+    }
+    const draft = {
+      condition,
+      flaws,
+      measurements,
+      tags,
+      optimizeFor,
+    };
+    const template = createTemplate(templateName, draft);
+    setTemplates((prev) => [template, ...prev]);
+    setTemplateName("");
+    track("template_saved", { id: template.id });
+  };
+
+  const applySelectedTemplate = (id) => {
+    const template = templates.find((t) => t.id === id);
+    if (!template) return;
+    applyTemplate(template, {
+      setCondition,
+      setFlaws,
+      setMeasurements,
+      setTags,
+      setOptimizeFor,
+    });
+    track("template_applied", { id });
+  };
+
+  const deleteTemplate = (id) => {
+    if (!confirm("Delete this template?")) return;
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    track("template_deleted", { id });
+  };
+
   const setPlatformStatus = (id, platform, status, url = "") => {
     setInventory((prev) =>
       prev.map((item) =>
@@ -179,11 +339,13 @@ export default function Home() {
 
     try {
       const payload = {
-        platform: "grailed",
+        platform: optimizeFor,
         title,
         description,
         tags,
         price,
+        condition,
+        flaws,
       };
       const improved = await improveListing(payload);
       setResult(improved);
@@ -238,15 +400,19 @@ export default function Home() {
     setError("");
     track("autofill_grailed_clicked");
 
+    const item = inventory.find((i) => i.id === id) || { id, title: job.title, platforms: {} };
     const response = await autofillGrailed(job);
     if (response?.ok) {
       track("autofill_grailed_succeeded");
       setPublished("grailed");
       setPlatformStatus(id, "grailed", "published");
+      logPublish(item, "grailed", "published");
     } else {
-      setError(response?.error || "Could not autofill Grailed.");
-      track("autofill_grailed_failed", { error: response?.error });
+      const err = response?.error || "Could not autofill Grailed.";
+      setError(err);
+      track("autofill_grailed_failed", { error: err });
       setPlatformStatus(id, "grailed", "draft");
+      logPublish(item, "grailed", "failed", err);
     }
   };
 
@@ -265,21 +431,27 @@ export default function Home() {
     track("publish_depop_clicked");
 
     const job = buildJob();
+    const item = inventory.find((i) => i.id === id) || { id, title: job.title, platforms: {} };
     const response = await publishDepop(job);
     if (response?.ok) {
       track("publish_depop_succeeded");
       setPublished("depop");
       setPlatformStatus(id, "depop", "published");
+      logPublish(item, "depop", "published");
     } else {
-      setError(response?.error || "Could not publish to Depop.");
-      track("publish_depop_failed", { error: response?.error });
+      const err = response?.error || "Could not publish to Depop.";
+      setError(err);
+      track("publish_depop_failed", { error: err });
       setPlatformStatus(id, "depop", "draft");
+      logPublish(item, "depop", "failed", err);
     }
   };
 
   const buildJob = () => ({
     title,
-    description: [description, measurements].filter(Boolean).join("\n\n"),
+    description: [description, formatCondition(condition, flaws), measurements]
+      .filter(Boolean)
+      .join("\n\n"),
     tags: tags
       .split(",")
       .map((t) => t.trim())
@@ -331,6 +503,26 @@ export default function Home() {
     });
   };
 
+  const updateMeasurementValue = (key, value) => {
+    setMeasurementValues((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const insertMeasurementTemplate = () => {
+    const formatted = formatMeasurements(measurementCategory, measurementValues);
+    if (!formatted) return;
+    setMeasurements((prev) => {
+      const base = prev.trim();
+      return base ? `${base}\n${formatted}` : formatted;
+    });
+  };
+
+  const generateMeasurementOverlay = () => {
+    const dataUrl = drawMeasurementOverlay(measurementCategory, measurementValues);
+    if (!dataUrl) return;
+    setImages((prev) => [...prev, dataUrl]);
+    track("measurement_overlay_generated", { category: measurementCategory });
+  };
+
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -366,7 +558,9 @@ export default function Home() {
       setPlatformStatus(item.id, platform, "publishing");
       const job = {
         title: item.title,
-        description: [item.description, item.measurements].filter(Boolean).join("\n\n"),
+        description: [item.description, formatCondition(item.condition, item.flaws), item.measurements]
+          .filter(Boolean)
+          .join("\n\n"),
         tags: item.tags || [],
         price: item.price,
         images: item.images || [],
@@ -379,14 +573,70 @@ export default function Home() {
 
       if (response?.ok) {
         setPlatformStatus(item.id, platform, "published");
+        logPublish(item, platform, "published");
       } else {
+        const err = response?.error || `Could not publish to ${platform}.`;
         setPlatformStatus(item.id, platform, "draft");
+        logPublish(item, platform, "failed", err);
       }
       // Small delay between sequential publishes to avoid tab spam.
       await new Promise((r) => setTimeout(r, 500));
     }
 
     track(`bulk_publish_${platform}_done`, { count: targets.length });
+    setSelectedIds(new Set());
+  };
+
+  const logPublish = (item, platform, status, error = "") => {
+    setPublishLog((prev) => [
+      {
+        id: `${item.id}-${platform}-${Date.now()}`,
+        listingId: item.id,
+        title: item.title || "Untitled",
+        platform,
+        status,
+        error,
+        ts: Date.now(),
+      },
+      ...prev.slice(0, 49),
+    ]);
+  };
+
+  const clearPublishLog = () => setPublishLog([]);
+
+  const publishedPlatforms = (item) =>
+    Object.entries(item.platforms || {}).filter(
+      ([, p]) => p.status === "published"
+    );
+
+  const markAsSold = (item) => {
+    const platforms = publishedPlatforms(item);
+    if (platforms.length === 0) return;
+
+    platforms.forEach(([platform, p]) => {
+      const url = p.url || platformDefaultUrl(platform);
+      setPlatformStatus(item.id, platform, "sold", p.url);
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    });
+
+    track("mark_as_sold", {
+      platforms: platforms.map(([p]) => p).join(","),
+      hasUrls: platforms.filter(([, p]) => p.url).length,
+    });
+  };
+
+  const platformDefaultUrl = (platform) => {
+    if (platform === "grailed") return "https://www.grailed.com/sell";
+    if (platform === "depop") return "https://www.depop.com/"; // best generic fallback
+    return "";
+  };
+
+  const bulkMarkAsSold = () => {
+    const targets = inventory.filter((item) => selectedIds.has(item.id));
+    if (targets.length === 0) return;
+    targets.forEach(markAsSold);
     setSelectedIds(new Set());
   };
 
@@ -443,6 +693,32 @@ export default function Home() {
 
       {error && <div className={styles.error}>{error}</div>}
 
+      {publishLog.length > 0 && (
+        <section className={styles.card}>
+          <div className={styles.publishLogHeader}>
+            <h2>Publish log</h2>
+            <button className={styles.secondary} onClick={clearPublishLog}>Clear</button>
+          </div>
+          <ul className={styles.publishLog}>
+            {publishLog.map((entry) => (
+              <li
+                key={entry.id}
+                className={
+                  entry.status === "failed" ? styles.publishError : styles.publishSuccess
+                }
+              >
+                <strong>{entry.title}</strong>
+                {" — "}
+                {entry.platform} {entry.status === "published" ? "published" : "failed"}
+                {entry.error && (
+                  <span className={styles.publishErrorMsg}>: {entry.error}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {extStatus === "missing" && (
         <section className={`${styles.card} ${styles.ctaCard}`}>
           <h2>Install the Second Skin extension</h2>
@@ -471,7 +747,18 @@ export default function Home() {
               <p className={styles.hint}>
                 Create your first listing, or import one from a Depop URL or the extension popup.
               </p>
-              <button className={styles.primary} onClick={startNew}>Create New Listing</button>
+              <div className={styles.actions}>
+                <button className={styles.primary} onClick={startNew}>Create New Listing</button>
+                <button className={styles.secondary} onClick={loadSample}>Try sample listing</button>
+              </div>
+              <div className={styles.tourChecklist}>
+                <h4>First-listing walkthrough</h4>
+                <ul>
+                  <li>Add item details or load the sample</li>
+                  <li>Click Improve with AI to optimize for your platform</li>
+                  <li>Save to inventory, then publish to Depop or Grailed</li>
+                </ul>
+              </div>
             </section>
           ) : (
             <>
@@ -499,6 +786,18 @@ export default function Home() {
                       onClick={() => bulkPublish("depop")}
                     >
                       Publish {selectedIds.size > 0 && `(${selectedIds.size})`} to Depop
+                    </button>
+                    <button
+                      className={styles.secondary}
+                      disabled={
+                        selectedIds.size === 0 ||
+                        !inventory.some(
+                          (item) => selectedIds.has(item.id) && publishedPlatforms(item).length > 0
+                        )
+                      }
+                      onClick={bulkMarkAsSold}
+                    >
+                      Mark sold {selectedIds.size > 0 && `(${selectedIds.size})`}
                     </button>
                     <button
                       className={styles.danger}
@@ -548,6 +847,11 @@ export default function Home() {
                       </div>
                       <div className={styles.inventoryActions}>
                         <button className={styles.secondary} onClick={() => loadIntoForm(item)}>Edit / Publish</button>
+                        {publishedPlatforms(item).length > 0 && (
+                          <button className={styles.secondary} onClick={() => markAsSold(item)}>
+                            Mark sold
+                          </button>
+                        )}
                         <button className={styles.danger} onClick={() => deleteListing(item.id)}>Delete</button>
                       </div>
                     </div>
@@ -564,6 +868,29 @@ export default function Home() {
           <div className={styles.actions}>
             <button className={styles.secondary} onClick={() => setView("list")}>← Back to Inventory</button>
           </div>
+
+          {!editingId && (
+            <section className={`${styles.card} ${styles.tourCard}`}>
+              <div className={styles.tourHeader}>
+                <h3>🎉 Welcome — create your first listing in 3 steps</h3>
+                <button
+                  className={styles.secondary}
+                  onClick={() => setView("list")}
+                  type="button"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <ol className={styles.tourSteps}>
+                <li>Add source URL or fill in title, description, and photos.</li>
+                <li>Choose a platform and click Improve with AI.</li>
+                <li>Save to inventory, then publish to Depop or Grailed.</li>
+              </ol>
+              <button className={styles.secondary} onClick={loadSample}>
+                Load sample listing
+              </button>
+            </section>
+          )}
 
           <section className={styles.card}>
             <h2>1. Source</h2>
@@ -634,6 +961,9 @@ export default function Home() {
                 placeholder="120"
               />
               <p className={styles.hint}>Used when improving for market-specific pricing.</p>
+              {price.trim() && (
+                <FeePanel price={price} targetNet={targetNet} setTargetNet={setTargetNet} setPrice={setPrice} />
+              )}
             </div>
             <div className={styles.field}>
               <label htmlFor="measurements">Measurements (optional)</label>
@@ -644,6 +974,173 @@ export default function Home() {
                 placeholder="Pit to pit: 24in, Length: 29in, Shoulder: 19in..."
               />
             </div>
+            <div className={styles.field}>
+              <label htmlFor="measurementCategory">Measurement template (optional)</label>
+              <select
+                id="measurementCategory"
+                value={measurementCategory}
+                onChange={(e) => {
+                  setMeasurementCategory(e.target.value);
+                  setMeasurementValues({});
+                }}
+              >
+                <option value="">— Select category —</option>
+                {Object.entries(MEASUREMENT_CATEGORIES).map(([key, cfg]) => (
+                  <option key={key} value={key}>{cfg.label}</option>
+                ))}
+              </select>
+              {measurementCategory && (
+                <>
+                  <div className={styles.measurementFields}>
+                    {MEASUREMENT_CATEGORIES[measurementCategory].fields.map((field) => (
+                      <div key={field.key} className={styles.measurementField}>
+                        <label htmlFor={`ms-${field.key}`}>{field.label}</label>
+                        <input
+                          id={`ms-${field.key}`}
+                          type="text"
+                          placeholder="in / cm"
+                          value={measurementValues[field.key] || ""}
+                          onChange={(e) => updateMeasurementValue(field.key, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.secondary}
+                      onClick={insertMeasurementTemplate}
+                      type="button"
+                    >
+                      Insert into measurements
+                    </button>
+                    <button
+                      className={styles.secondary}
+                      onClick={generateMeasurementOverlay}
+                      type="button"
+                    >
+                      Generate overlay image
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="condition">Condition (optional)</label>
+              <select
+                id="condition"
+                value={condition}
+                onChange={(e) => setCondition(e.target.value)}
+              >
+                <option value="">— Select condition —</option>
+                {CONDITION_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            {condition && (
+              <div className={styles.field}>
+                <label>Flaws / disclosures</label>
+                <div className={styles.flawList}>
+                  {flaws.map((flaw, i) => (
+                    <div key={i} className={styles.flawRow}>
+                      <input
+                        type="text"
+                        placeholder="Location (e.g. left sleeve)"
+                        value={flaw.location || ""}
+                        onChange={(e) => {
+                          const next = [...flaws];
+                          next[i] = { ...next[i], location: e.target.value };
+                          setFlaws(next);
+                        }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Description (e.g. tiny hole)"
+                        value={flaw.description || ""}
+                        onChange={(e) => {
+                          const next = [...flaws];
+                          next[i] = { ...next[i], description: e.target.value };
+                          setFlaws(next);
+                        }}
+                      />
+                      <button
+                        className={styles.removeFlaw}
+                        onClick={() => setFlaws(flaws.filter((_, idx) => idx !== i))}
+                        type="button"
+                        title="Remove flaw"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className={styles.secondary}
+                    onClick={() => setFlaws([...flaws, { location: "", description: "" }])}
+                    type="button"
+                  >
+                    + Add flaw
+                  </button>
+                </div>
+                {formatCondition(condition, flaws) && (
+                  <p className={styles.conditionPreview}>
+                    Preview: {formatCondition(condition, flaws)}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className={styles.field}>
+              <label>Templates / brand defaults</label>
+              {templates.length > 0 && (
+                <div className={styles.templateRow}>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) applySelectedTemplate(e.target.value);
+                      e.target.value = "";
+                    }}
+                  >
+                    <option value="">— Apply a template —</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className={styles.templateSaveRow}>
+                <input
+                  type="text"
+                  placeholder="Template name (e.g. Vintage tees)"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                />
+                <button
+                  className={styles.secondary}
+                  onClick={saveTemplate}
+                  type="button"
+                >
+                  Save current as template
+                </button>
+              </div>
+              {templates.length > 0 && (
+                <ul className={styles.templateList}>
+                  {templates.map((t) => (
+                    <li key={t.id}>
+                      <span>{t.name}</span>
+                      <button
+                        className={styles.removeFlaw}
+                        onClick={() => deleteTemplate(t.id)}
+                        title="Delete template"
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <div className={styles.field}>
               <label htmlFor="images">Photos (optional)</label>
               <input
@@ -690,6 +1187,19 @@ export default function Home() {
               )}
             </div>
             <div className={styles.actions}>
+              <div className={styles.platformSelect}>
+                <label htmlFor="optimizeFor">Optimize for</label>
+                <select
+                  id="optimizeFor"
+                  value={optimizeFor}
+                  onChange={(e) => setOptimizeFor(e.target.value)}
+                  disabled={loading}
+                >
+                  <option value="grailed">Grailed</option>
+                  <option value="depop">Depop</option>
+                  <option value="poshmark">Poshmark</option>
+                </select>
+              </div>
               <button
                 className={styles.primary}
                 onClick={handleImprove}
@@ -801,6 +1311,74 @@ export default function Home() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function FeePanel({ price, targetNet, setTargetNet, setPrice }) {
+  const payouts = calculatePayouts(price);
+  if (!payouts) return null;
+
+  return (
+    <div className={styles.feePanel}>
+      <h4>Estimated payout by platform</h4>
+      <div className={styles.feeGrid}>
+        {Object.keys(FEE_CONFIG).map((key) => {
+          const cfg = FEE_CONFIG[key];
+          const p = payouts[key];
+          return (
+            <div key={key} className={styles.feeCard} style={{ borderColor: cfg.color }}>
+              <div className={styles.feeName}>{cfg.name}</div>
+              <div className={styles.feeNet}>${p.net.toFixed(2)}</div>
+              <div className={styles.feeMeta}>
+                ${p.total.toFixed(2)} fees ({p.effective.toFixed(1)}%)
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className={styles.reverseCalc}>
+        <label htmlFor="targetNet">I want to net</label>
+        <div className={styles.reverseRow}>
+          <span className={styles.currency}>$</span>
+          <input
+            id="targetNet"
+            type="text"
+            value={targetNet}
+            onChange={(e) => setTargetNet(e.target.value)}
+            placeholder="100"
+          />
+        </div>
+        {(() => {
+          if (!targetNet.trim()) return null;
+          const suggestions = Object.keys(FEE_CONFIG)
+            .map((key) => ({ key, ...suggestListPrice(targetNet, key) }))
+            .filter((s) => s.listPrice);
+          if (suggestions.length === 0) return null;
+          return (
+            <div className={styles.feeGrid}>
+              {suggestions.map((s) => {
+                const cfg = FEE_CONFIG[s.key];
+                return (
+                  <button
+                    key={s.key}
+                    className={styles.feeCard}
+                    style={{ borderColor: cfg.color }}
+                    onClick={() => setPrice(String(s.listPrice))}
+                    type="button"
+                  >
+                    <div className={styles.feeName}>{cfg.name}</div>
+                    <div className={styles.feeNet}>${s.listPrice.toFixed(2)}</div>
+                    <div className={styles.feeMeta}>List price to net ${s.targetNet.toFixed(2)}</div>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
+      <p className={styles.hint}>Fees are approximate. Verify current rates before listing.</p>
     </div>
   );
 }
