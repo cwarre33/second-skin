@@ -5,10 +5,14 @@
   "description": "Local-first browser extension to cross-list resale inventory across Depop and Grailed.",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "scripting",
+    "activeTab"
   ],
   "host_permissions": [
-    "http://localhost:11434/*"
+    "http://localhost:11434/*",
+    "*://*.depop.com/*",
+    "*://*.grailed.com/*"
   ],
   "background": {
     "service_worker": "background.js"
