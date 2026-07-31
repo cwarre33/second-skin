@@ -333,6 +333,65 @@ test("summarizeStale aggregates refresh and price_drop counts", () => {
   assert.deepStrictEqual(STALE.summarizeStale(inventory, NOW), { refresh: 1, price_drop: 2 });
 });
 
+// Per-platform crop helpers (#44).
+const CROP = require("../demo/lib/crop.js");
+
+test("clampOffset clamps to [0,1] and defaults NaN to 0.5", () => {
+  assert.strictEqual(CROP.clampOffset(-1), 0);
+  assert.strictEqual(CROP.clampOffset(2), 1);
+  assert.strictEqual(CROP.clampOffset(0.3), 0.3);
+  assert.strictEqual(CROP.clampOffset(NaN), 0.5);
+});
+
+test("computeCoverCrop returns null for degenerate source", () => {
+  assert.strictEqual(CROP.computeCoverCrop(0, 100, 1), null);
+  assert.strictEqual(CROP.computeCoverCrop(100, 0, 1), null);
+  assert.strictEqual(CROP.computeCoverCrop(100, 100, 0), null);
+});
+
+test("computeCoverCrop crops a wide source horizontally for a square aspect", () => {
+  // 1000x500 source, 1:1 target → square 500x500, full height, crop width.
+  const r = CROP.computeCoverCrop(1000, 500, 1, 0.5);
+  assert.strictEqual(r.sw, 500);
+  assert.strictEqual(r.sh, 500);
+  assert.strictEqual(r.sy, 0);
+  // Centered: sx = 0.5 * (1000 - 500) = 250.
+  assert.strictEqual(r.sx, 250);
+});
+
+test("computeCoverCrop offset slides the horizontal crop", () => {
+  const left = CROP.computeCoverCrop(1000, 500, 1, 0);
+  const right = CROP.computeCoverCrop(1000, 500, 1, 1);
+  assert.strictEqual(left.sx, 0);
+  assert.strictEqual(right.sx, 500);
+});
+
+test("computeCoverCrop crops a tall source vertically for a 4:5 portrait", () => {
+  // 500x1000 source, 4:5 (0.8) target → source taller → full width, crop height.
+  const r = CROP.computeCoverCrop(500, 1000, 4 / 5, 0.5);
+  assert.strictEqual(r.sw, 500);
+  assert.strictEqual(r.sx, 0);
+  // sh = srcW / aspect = 500 / 0.8 = 625.
+  assert.strictEqual(r.sh, 625);
+  // Centered: sy = 0.5 * (1000 - 625) = 187.5.
+  assert.strictEqual(r.sy, 187.5);
+});
+
+test("computeCoverCrop returns the whole image when aspects match", () => {
+  const r = CROP.computeCoverCrop(800, 800, 1, 0.7);
+  assert.strictEqual(r.sw, 800);
+  assert.strictEqual(r.sh, 800);
+  assert.strictEqual(r.sx, 0);
+  assert.strictEqual(r.sy, 0);
+});
+
+test("defaultCropOffsets centers every platform", () => {
+  const o = CROP.defaultCropOffsets();
+  for (const p of CROP.CROP_PLATFORMS) {
+    assert.strictEqual(o[p], 0.5, `${p} should default to centered`);
+  }
+});
+
 test("createListing carries structured fields category/brand/size (#49)", () => {
   const listing = INVENTORY.createListing({
     title: "Vintage tee",

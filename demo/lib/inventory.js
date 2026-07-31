@@ -36,6 +36,7 @@ export function createListing(draft = {}) {
     size: draft.size || "",
     flaws: draft.flaws || [],
     images: draft.images || [],
+    cropOffsets: draft.cropOffsets || {},
     url: draft.url || "",
     platforms: {
       grailed: { status: "draft", url: "", lastUpdated: "" },

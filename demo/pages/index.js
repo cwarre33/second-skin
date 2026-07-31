@@ -5,6 +5,8 @@ import { useExtension } from "@/hooks/useExtension";
 import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import { usePublishLog } from "@/hooks/usePublishLog";
 import { PublishLog } from "@/components/PublishLog";
+import PlatformCropPreview from "@/components/PlatformCropPreview";
+import { CROP_PLATFORMS, defaultCropOffsets } from "@/lib/crop";
 import {
   CONDITION_OPTIONS,
   createListing,
@@ -77,6 +79,8 @@ export default function Home() {
   const [flaws, setFlaws] = useState([]);
   const [targetNet, setTargetNet] = useState("");
   const [optimizeFor, setOptimizeFor] = useState("grailed");
+  // Per-platform crop offsets (#44). 0 = top/left, 0.5 = centered, 1 = bottom/right.
+  const [cropOffsets, setCropOffsets] = useState(defaultCropOffsets);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -102,6 +106,7 @@ export default function Home() {
     if (saved.flaws !== undefined) setFlaws(saved.flaws);
     if (saved.targetNet !== undefined) setTargetNet(saved.targetNet);
     if (saved.optimizeFor !== undefined) setOptimizeFor(saved.optimizeFor);
+    if (saved.cropOffsets !== undefined) setCropOffsets({ ...defaultCropOffsets(), ...saved.cropOffsets });
     if (saved.images && saved.images.length > 0) setImages(saved.images);
     if (saved.title?.trim() || saved.description?.trim()) {
       setView("form");
@@ -123,9 +128,10 @@ export default function Home() {
       flaws,
       targetNet,
       optimizeFor,
+      cropOffsets,
       images,
     }),
-    [url, title, description, tags, price, measurements, condition, category, brand, size, flaws, targetNet, optimizeFor, images]
+    [url, title, description, tags, price, measurements, condition, category, brand, size, flaws, targetNet, optimizeFor, cropOffsets, images]
   );
 
   const draftApi = useMemo(
@@ -225,6 +231,7 @@ export default function Home() {
     setFlaws([]);
     setTargetNet("");
     setOptimizeFor("grailed");
+    setCropOffsets(defaultCropOffsets());
     setResult(null);
     setError("");
     setPublished(null);
@@ -268,6 +275,7 @@ export default function Home() {
     setBrand(listing.brand || "");
     setSize(listing.size || "");
     setFlaws(listing.flaws || []);
+    setCropOffsets({ ...defaultCropOffsets(), ...(listing.cropOffsets || {}) });
     setResult(null);
     setError("");
     setPublished(null);
@@ -294,6 +302,7 @@ export default function Home() {
       brand,
       size,
       flaws,
+      cropOffsets,
       images,
     };
 
@@ -546,6 +555,11 @@ export default function Home() {
       next.splice(to, 0, moved);
       return next;
     });
+  };
+
+  // Per-platform crop offset (#44). Slider drives where the cover crop falls.
+  const setCropOffset = (platform, value) => {
+    setCropOffsets((prev) => ({ ...prev, [platform]: value }));
   };
 
   const updateMeasurementValue = (key, value) => {
@@ -1258,6 +1272,27 @@ export default function Home() {
                 </>
               )}
             </div>
+
+            {images.length > 0 && (
+              <div className={styles.field}>
+                <label>Per-platform crop preview</label>
+                <p className={styles.hint}>
+                  Each marketplace shows your cover photo at a different aspect ratio.
+                  Adjust the crop position per destination so the garment stays in frame.
+                </p>
+                <div className="cropGrid">
+                  {CROP_PLATFORMS.map((platform) => (
+                    <PlatformCropPreview
+                      key={platform}
+                      src={images[0]}
+                      platform={platform}
+                      offset={cropOffsets[platform] ?? 0.5}
+                      onOffsetChange={setCropOffset}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             <div className={styles.actions}>
               <div className={styles.platformSelect}>
                 <label htmlFor="optimizeFor">Optimize for</label>
