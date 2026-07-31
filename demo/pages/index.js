@@ -28,6 +28,18 @@ const STATUS_LABEL = {
   sold: "Sold",
 };
 
+const SAMPLE_LISTING = {
+  title: "Vintage NIN ‘Pretty Hate Machine’ Tee",
+  description:
+    "Single-stitch black tee from the 1990 Pretty Hate Machine era. Soft cotton with a faded front print. Great vintage condition with light wear consistent with age.",
+  tags: "vintage, band tee, nine inch nails, 90s, single stitch",
+  price: "85",
+  measurements: "Pit to pit: 22in, Length: 28in, Shoulder: 19in",
+  condition: "good",
+  flaws: [{ location: "print", description: "slight fading" }],
+  optimizeFor: "grailed",
+};
+
 export default function Home() {
   const [inventory, setInventory] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -187,6 +199,20 @@ export default function Home() {
     resetForm();
     setView("form");
     track("create_new_listing");
+  };
+
+  const loadSample = () => {
+    resetForm();
+    setTitle(SAMPLE_LISTING.title);
+    setDescription(SAMPLE_LISTING.description);
+    setTags(SAMPLE_LISTING.tags);
+    setPrice(SAMPLE_LISTING.price);
+    setMeasurements(SAMPLE_LISTING.measurements);
+    setCondition(SAMPLE_LISTING.condition);
+    setFlaws(SAMPLE_LISTING.flaws);
+    setOptimizeFor(SAMPLE_LISTING.optimizeFor);
+    setView("form");
+    track("sample_listing_loaded");
   };
 
   const loadIntoForm = (listing) => {
@@ -694,7 +720,18 @@ export default function Home() {
               <p className={styles.hint}>
                 Create your first listing, or import one from a Depop URL or the extension popup.
               </p>
-              <button className={styles.primary} onClick={startNew}>Create New Listing</button>
+              <div className={styles.actions}>
+                <button className={styles.primary} onClick={startNew}>Create New Listing</button>
+                <button className={styles.secondary} onClick={loadSample}>Try sample listing</button>
+              </div>
+              <div className={styles.tourChecklist}>
+                <h4>First-listing walkthrough</h4>
+                <ul>
+                  <li>Add item details or load the sample</li>
+                  <li>Click Improve with AI to optimize for your platform</li>
+                  <li>Save to inventory, then publish to Depop or Grailed</li>
+                </ul>
+              </div>
             </section>
           ) : (
             <>
@@ -804,6 +841,29 @@ export default function Home() {
           <div className={styles.actions}>
             <button className={styles.secondary} onClick={() => setView("list")}>← Back to Inventory</button>
           </div>
+
+          {!editingId && (
+            <section className={`${styles.card} ${styles.tourCard}`}>
+              <div className={styles.tourHeader}>
+                <h3>🎉 Welcome — create your first listing in 3 steps</h3>
+                <button
+                  className={styles.secondary}
+                  onClick={() => setView("list")}
+                  type="button"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <ol className={styles.tourSteps}>
+                <li>Add source URL or fill in title, description, and photos.</li>
+                <li>Choose a platform and click Improve with AI.</li>
+                <li>Save to inventory, then publish to Depop or Grailed.</li>
+              </ol>
+              <button className={styles.secondary} onClick={loadSample}>
+                Load sample listing
+              </button>
+            </section>
+          )}
 
           <section className={styles.card}>
             <h2>1. Source</h2>

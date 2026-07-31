@@ -278,3 +278,56 @@ button.feeCard:hover {
   border-radius: 0.375rem;
   font-size: 0.85rem;
 }
+
+/* First-listing onboarding tour (issue #54) */
+
+.tourCard {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+}
+
+.tourHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.tourHeader h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0c4a6e;
+}
+
+.tourSteps {
+  margin: 0 0 0.75rem 1.25rem;
+  padding: 0;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.tourSteps li {
+  margin-bottom: 0.35rem;
+}
+
+.tourChecklist {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.5rem;
+}
+
+.tourChecklist h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.tourChecklist ul {
+  margin: 0 0 0 1.25rem;
+  padding: 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
