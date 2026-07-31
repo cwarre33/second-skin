@@ -4,7 +4,9 @@ import { useAnalytics } from "@/hooks/useAnalytics";
 import { useExtension } from "@/hooks/useExtension";
 import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import {
+  CONDITION_OPTIONS,
   createListing,
+  formatCondition,
   loadInventory,
   saveInventory,
   updateListingStatus,
@@ -35,6 +37,8 @@ export default function Home() {
   const [images, setImages] = useState([]);
   const [draggingIdx, setDraggingIdx] = useState(null);
   const [measurements, setMeasurements] = useState("");
+  const [condition, setCondition] = useState("");
+  const [flaws, setFlaws] = useState([]);
   const [targetNet, setTargetNet] = useState("");
   const [optimizeFor, setOptimizeFor] = useState("grailed");
   const [loading, setLoading] = useState(false);
@@ -55,6 +59,8 @@ export default function Home() {
     if (saved.tags !== undefined) setTags(saved.tags);
     if (saved.price !== undefined) setPrice(saved.price);
     if (saved.measurements !== undefined) setMeasurements(saved.measurements);
+    if (saved.condition !== undefined) setCondition(saved.condition);
+    if (saved.flaws !== undefined) setFlaws(saved.flaws);
     if (saved.targetNet !== undefined) setTargetNet(saved.targetNet);
     if (saved.optimizeFor !== undefined) setOptimizeFor(saved.optimizeFor);
     if (saved.images && saved.images.length > 0) setImages(saved.images);
@@ -71,11 +77,13 @@ export default function Home() {
       tags,
       price,
       measurements,
+      condition,
+      flaws,
       targetNet,
       optimizeFor,
       images,
     }),
-    [url, title, description, tags, price, measurements, targetNet, optimizeFor, images]
+    [url, title, description, tags, price, measurements, condition, flaws, targetNet, optimizeFor, images]
   );
 
   const draftApi = useMemo(
@@ -87,12 +95,14 @@ export default function Home() {
         tags.trim() ||
         price.trim() ||
         measurements.trim() ||
+        condition ||
+        flaws.length > 0 ||
         url.trim() ||
         optimizeFor !== "grailed" ||
         images.length > 0,
       restore: restoreDraft,
     }),
-    [draftSnapshot, title, description, tags, price, measurements, url, optimizeFor, images, restoreDraft]
+    [draftSnapshot, title, description, tags, price, measurements, condition, flaws, url, optimizeFor, images, restoreDraft]
   );
 
   const { clear: clearDraft } = useDraftAutosave(draftApi);
@@ -148,6 +158,8 @@ export default function Home() {
     setPrice("");
     setImages([]);
     setMeasurements("");
+    setCondition("");
+    setFlaws([]);
     setTargetNet("");
     setOptimizeFor("grailed");
     setResult(null);
@@ -171,6 +183,8 @@ export default function Home() {
     setPrice(String(listing.price || ""));
     setImages(listing.images || []);
     setMeasurements(listing.measurements || "");
+    setCondition(listing.condition || "");
+    setFlaws(listing.flaws || []);
     setResult(null);
     setError("");
     setPublished(null);
@@ -192,6 +206,8 @@ export default function Home() {
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       price,
       measurements,
+      condition,
+      flaws,
       images,
     };
 
@@ -243,6 +259,8 @@ export default function Home() {
         description,
         tags,
         price,
+        condition,
+        flaws,
       };
       const improved = await improveListing(payload);
       setResult(improved);
@@ -346,7 +364,9 @@ export default function Home() {
 
   const buildJob = () => ({
     title,
-    description: [description, measurements].filter(Boolean).join("\n\n"),
+    description: [description, formatCondition(condition, flaws), measurements]
+      .filter(Boolean)
+      .join("\n\n"),
     tags: tags
       .split(",")
       .map((t) => t.trim())
@@ -433,7 +453,9 @@ export default function Home() {
       setPlatformStatus(item.id, platform, "publishing");
       const job = {
         title: item.title,
-        description: [item.description, item.measurements].filter(Boolean).join("\n\n"),
+        description: [item.description, formatCondition(item.condition, item.flaws), item.measurements]
+          .filter(Boolean)
+          .join("\n\n"),
         tags: item.tags || [],
         price: item.price,
         images: item.images || [],
@@ -813,6 +835,70 @@ export default function Home() {
                 placeholder="Pit to pit: 24in, Length: 29in, Shoulder: 19in..."
               />
             </div>
+            <div className={styles.field}>
+              <label htmlFor="condition">Condition (optional)</label>
+              <select
+                id="condition"
+                value={condition}
+                onChange={(e) => setCondition(e.target.value)}
+              >
+                <option value="">— Select condition —</option>
+                {CONDITION_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            {condition && (
+              <div className={styles.field}>
+                <label>Flaws / disclosures</label>
+                <div className={styles.flawList}>
+                  {flaws.map((flaw, i) => (
+                    <div key={i} className={styles.flawRow}>
+                      <input
+                        type="text"
+                        placeholder="Location (e.g. left sleeve)"
+                        value={flaw.location || ""}
+                        onChange={(e) => {
+                          const next = [...flaws];
+                          next[i] = { ...next[i], location: e.target.value };
+                          setFlaws(next);
+                        }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Description (e.g. tiny hole)"
+                        value={flaw.description || ""}
+                        onChange={(e) => {
+                          const next = [...flaws];
+                          next[i] = { ...next[i], description: e.target.value };
+                          setFlaws(next);
+                        }}
+                      />
+                      <button
+                        className={styles.removeFlaw}
+                        onClick={() => setFlaws(flaws.filter((_, idx) => idx !== i))}
+                        type="button"
+                        title="Remove flaw"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className={styles.secondary}
+                    onClick={() => setFlaws([...flaws, { location: "", description: "" }])}
+                    type="button"
+                  >
+                    + Add flaw
+                  </button>
+                </div>
+                {formatCondition(condition, flaws) && (
+                  <p className={styles.conditionPreview}>
+                    Preview: {formatCondition(condition, flaws)}
+                  </p>
+                )}
+              </div>
+            )}
             <div className={styles.field}>
               <label htmlFor="images">Photos (optional)</label>
               <input

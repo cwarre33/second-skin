@@ -47,6 +47,10 @@ const PLATFORM_PROMPTS = {
 };
 
 function hashRequest(payload) {
+  const flaws = Array.isArray(payload.flaws) ? payload.flaws : [];
+  const flawHash = flaws
+    .map((f) => `${String(f.location || "").trim().toLowerCase()}:${String(f.description || "").trim().toLowerCase()}`)
+    .join(";");
   const normalized = [
     String(payload.platform || "grailed"),
     String(payload.title || "").trim().toLowerCase(),
@@ -55,6 +59,8 @@ function hashRequest(payload) {
       .map((t) => String(t).trim().toLowerCase())
       .filter(Boolean)
       .join(","),
+    String(payload.condition || "").trim().toLowerCase(),
+    flawHash,
   ].join("|");
   let hash = 0;
   for (let i = 0; i < normalized.length; i++) {
@@ -102,7 +108,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "Rate limit exceeded. Try again in a minute." });
   }
 
-  const { platform = "grailed", title = "", description = "", tags = [], price = "" } = req.body || {};
+  const { platform = "grailed", title = "", description = "", tags = [], price = "", condition = "", flaws = [] } = req.body || {};
 
   if (!title.trim() && !description.trim()) {
     return res.status(400).json({ error: "Provide a title or description." });
@@ -112,14 +118,14 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: "NVIDIA_API_KEY is not configured." });
   }
 
-  const cacheKey = hashRequest({ platform, title, description, tags, price });
+  const cacheKey = hashRequest({ platform, title, description, tags, price, condition, flaws });
   const cached = getCached(cacheKey);
   if (cached) {
     return res.status(200).json({ ...cached, cached: true });
   }
 
   try {
-    const improved = await improveWithNim({ platform, title, description, tags, price });
+    const improved = await improveWithNim({ platform, title, description, tags, price, condition, flaws });
     setCached(cacheKey, improved);
     return res.status(200).json(improved);
   } catch (err) {
@@ -130,9 +136,19 @@ export default async function handler(req, res) {
   }
 }
 
-async function improveWithNim({ platform, title, description, tags, price }) {
+async function improveWithNim({ platform, title, description, tags, price, condition, flaws }) {
   const existingTags = Array.isArray(tags) ? tags.join(", ") : String(tags || "");
   const rules = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.grailed;
+
+  const flawText = (flaws || [])
+    .filter((f) => f.location?.trim() || f.description?.trim())
+    .map((f) => {
+      const loc = f.location?.trim();
+      const desc = f.description?.trim();
+      if (loc && desc) return `${loc}: ${desc}`;
+      return loc || desc;
+    })
+    .join("; ");
 
   const prompt = [
     `You are a fashion resale expert optimizing a listing for ${rules.name}.`,
@@ -144,6 +160,7 @@ async function improveWithNim({ platform, title, description, tags, price }) {
     rules.descriptionRules,
     rules.tagRules,
     price ? "- price context (do NOT return price): " + price : "",
+    condition ? "- condition context (do NOT return condition separately): " + condition + (flawText ? "; flaws: " + flawText : "") : "",
     "- Return ONLY the JSON object, no markdown, no explanation.",
     "",
     "Draft title:", title || "(none)",
