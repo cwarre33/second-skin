@@ -104,10 +104,22 @@ observer.observe(document.body, { childList: true, subtree: true });
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action !== "parseDepopListing") return false;
 
-  const data = parseActiveListing();
-  sendResponse({ ok: true, job: data });
-  return false;
+  // Depop is an SPA: the listing DOM may not have hydrated when the message
+  // arrives. Wait briefly for a title-like element, then read the DOM. Keep the
+  // channel open (return true) so sendResponse fires after the async work.
+  parseActiveListingAsync()
+    .then((data) => sendResponse({ ok: true, job: data }))
+    .catch((err) => sendResponse({ ok: false, error: err.message || "Failed to parse Depop listing." }));
+  return true;
 });
+
+async function parseActiveListingAsync() {
+  await SECOND_SKIN.waitFor(
+    '[data-testid*="title" i], h1, [class*="title" i]',
+    2500
+  );
+  return parseActiveListing();
+}
 
 function parseActiveListing() {
   const title = pickText([
@@ -181,6 +193,10 @@ function pickImages() {
     const absolute = resolveUrl(src);
     // Skip tiny icons and generic placeholders.
     if (absolute.match(/\.(svg|png|ico)(\?|$)/i) && !absolute.match(/depop|cdn/i)) return;
+    // Skip avatars / profile / placeholder imagery that leaks past the icon filter.
+    if (absolute.match(/avatar|profile|placeholder/i)) return;
+    // Skip loaded images smaller than 100px (thumbnails of related items/avatars).
+    if (img.naturalWidth && img.naturalHeight && (img.naturalWidth < 100 || img.naturalHeight < 100)) return;
     urls.add(absolute);
   });
 

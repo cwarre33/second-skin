@@ -548,7 +548,7 @@ export default function Home() {
   };
 
   const bulkPublish = async (platform) => {
-    if (!extStatus === "ready") return;
+    if (extStatus !== "ready") return;
     const targets = inventory.filter((item) => selectedIds.has(item.id));
     if (targets.length === 0) return;
 

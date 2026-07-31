@@ -43,7 +43,7 @@ async function handleCrossList(tab) {
     }
 
     const job = response.job;
-    const demoUrl = buildDemoUrl(job);
+    const demoUrl = await buildDemoUrl(job);
     chrome.tabs.create({ url: demoUrl });
     window.close();
   } catch (err) {
@@ -54,7 +54,7 @@ async function handleCrossList(tab) {
   }
 }
 
-function buildDemoUrl(job) {
+async function buildDemoUrl(job) {
   const params = new URLSearchParams();
   params.set("source", "depop");
   params.set("url", job.url || "");
@@ -69,7 +69,12 @@ function buildDemoUrl(job) {
     params.set("image", job.images[0]);
   }
 
-  const origin = job.url?.includes("depop.com") ? DEMO_ORIGIN : DEMO_ORIGIN;
+  // Target the dev demo (localhost:3000) when the operator has opted in via
+  // chrome.storage.local.demoDevMode; otherwise ship the production demo URL.
+  const useDev = await new Promise((resolve) =>
+    chrome.storage.local.get(["demoDevMode"], (data) => resolve(!!data.demoDevMode))
+  );
+  const origin = useDev ? DEMO_DEV_ORIGIN : DEMO_ORIGIN;
   return `${origin}/?${params.toString()}`;
 }
 
