@@ -485,3 +485,63 @@ function extractFashionTokens(text) {
 function dedupeAndTrim(items, limit) {
   return Array.from(new Set(items.map((s) => String(s).trim().toLowerCase()).filter(Boolean))).slice(0, limit);
 }
+
+// --- Passive Grailed sold-state detection (#51) ---
+//
+// Mirrors the Depop profile scraper (content_depop.js passiveProfileScrape).
+// When the operator views a Grailed storefront or the listings index — a page
+// that shows a seller's live listings — cross-reference inventory and mark any
+// active Grailed item whose URL is no longer in the live set as "sold".
+//
+// Honest UX: this is DETECTION ONLY. It never auto-delists, removes, or
+// publishes anything; it only flips the local inventory status to "sold" so the
+// dashboard can surface it. The user reviews and acts.
+//
+// Known limitations (same shape as the Depop scraper):
+//   - A paginated storefront only shows the first page of listings; items on
+//     later pages are not in `liveUrls` and would be falsely marked sold.
+//   - Viewing another seller's storefront marks your items (whose URLs aren't
+//     on that page) sold. Status is user-correctable; no destructive action.
+// Mitigation: only run on storefront/index-style paths (a bare /segment, e.g.
+// grailed.com/<seller> or grailed.com/listings), never on a single listing
+// (grailed.com/listings/<id>), and only when listing links are present.
+
+function passiveGrailedScrape() {
+  // Storefront/index-style path: a single path segment (e.g. /<seller> or
+  // /listings). Excludes single listings (/listings/<id>) and /sell/new (two
+  // segments). /sell (exact) does match, but the sell form has no listing
+  // links, so liveUrls is empty and we early-return below — no harm.
+  if (!window.location.pathname.match(/^\/[a-zA-Z0-9_.-]+\/?$/)) return;
+
+  const liveUrls = Array.from(document.querySelectorAll('a[href*="/listings/"]'))
+    .map((a) => a.href)
+    .filter((href) => /grailed\.com\/listings\//i.test(href));
+  if (liveUrls.length === 0) return;
+
+  chrome.storage.local.get(["inventory"], (data) => {
+    const inventory = data.inventory || [];
+    let mutated = false;
+
+    inventory.forEach((item) => {
+      const meta = item.platforms && item.platforms.grailed;
+      if (meta && meta.status === "active" && meta.url && !liveUrls.includes(meta.url)) {
+        meta.status = "sold";
+        meta.lastChecked = new Date().toISOString();
+        mutated = true;
+      }
+    });
+
+    if (mutated) {
+      chrome.storage.local.set({ inventory });
+    }
+  });
+}
+
+setTimeout(passiveGrailedScrape, 3500);
+
+const grailedObserver = new MutationObserver(() => {
+  if (grailedObserver._timer) clearTimeout(grailedObserver._timer);
+  grailedObserver._timer = setTimeout(passiveGrailedScrape, 1500);
+});
+
+grailedObserver.observe(document.body, { childList: true, subtree: true });
