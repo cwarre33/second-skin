@@ -98,19 +98,49 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
 async function handleParseDepop(url) {
   const tabs = await chrome.tabs.query({ url: ["*://*.depop.com/*"] });
-  const target = tabs.find((t) => (url ? t.url === url : t.active)) || tabs[0];
+  const target =
+    tabs.find((t) => url && t.url && t.url.split("?")[0] === url.split("?")[0]) ||
+    tabs.find((t) => url && t.url === url) ||
+    tabs.find((t) => t.active) ||
+    tabs[0];
   if (!target) {
     return { ok: false, error: "No Depop tab found. Open the listing and try again." };
   }
 
-  return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(target.id, { action: "parseDepopListing" }, (response) => {
-      if (chrome.runtime.lastError) {
-        return reject(new Error(chrome.runtime.lastError.message));
-      }
-      resolve(response || { ok: false, error: "No response from Depop page." });
+  async function sendParseMessage(tabId) {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tabId, { action: "parseDepopListing" }, (response) => {
+        if (chrome.runtime.lastError) {
+          return reject(new Error(chrome.runtime.lastError.message));
+        }
+        resolve(response || { ok: false, error: "No response from Depop page." });
+      });
     });
-  });
+  }
+
+  try {
+    return await sendParseMessage(target.id);
+  } catch (err) {
+    const isMissingReceiver = /receiving end does not exist/i.test(err.message);
+    if (!isMissingReceiver) {
+      return { ok: false, error: err.message };
+    }
+
+    // Content script is not running in this tab (common after extension install
+    // or on pre-rendered SPAs). Programmatically inject it and retry once.
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: target.id },
+        files: ["shared.js", "content_depop.js"],
+      });
+      return await sendParseMessage(target.id);
+    } catch (injectErr) {
+      return {
+        ok: false,
+        error: `Could not inject into Depop tab: ${injectErr.message}`,
+      };
+    }
+  }
 }
 
 async function handlePublish(job, targetSite) {
