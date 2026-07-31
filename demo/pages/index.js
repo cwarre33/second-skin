@@ -17,6 +17,7 @@ const STATUS_LABEL = {
   publishing: "Publishing...",
   published: "Needs review",
   review: "Needs review",
+  sold: "Sold",
 };
 
 export default function Home() {
@@ -41,6 +42,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
   const [published, setPublished] = useState(null);
+  const [publishLog, setPublishLog] = useState([]);
 
   const { track } = useAnalytics();
   const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed, publishDepop } = useExtension();
@@ -295,15 +297,19 @@ export default function Home() {
     setError("");
     track("autofill_grailed_clicked");
 
+    const item = inventory.find((i) => i.id === id) || { id, title: job.title, platforms: {} };
     const response = await autofillGrailed(job);
     if (response?.ok) {
       track("autofill_grailed_succeeded");
       setPublished("grailed");
       setPlatformStatus(id, "grailed", "published");
+      logPublish(item, "grailed", "published");
     } else {
-      setError(response?.error || "Could not autofill Grailed.");
-      track("autofill_grailed_failed", { error: response?.error });
+      const err = response?.error || "Could not autofill Grailed.";
+      setError(err);
+      track("autofill_grailed_failed", { error: err });
       setPlatformStatus(id, "grailed", "draft");
+      logPublish(item, "grailed", "failed", err);
     }
   };
 
@@ -322,15 +328,19 @@ export default function Home() {
     track("publish_depop_clicked");
 
     const job = buildJob();
+    const item = inventory.find((i) => i.id === id) || { id, title: job.title, platforms: {} };
     const response = await publishDepop(job);
     if (response?.ok) {
       track("publish_depop_succeeded");
       setPublished("depop");
       setPlatformStatus(id, "depop", "published");
+      logPublish(item, "depop", "published");
     } else {
-      setError(response?.error || "Could not publish to Depop.");
-      track("publish_depop_failed", { error: response?.error });
+      const err = response?.error || "Could not publish to Depop.";
+      setError(err);
+      track("publish_depop_failed", { error: err });
       setPlatformStatus(id, "depop", "draft");
+      logPublish(item, "depop", "failed", err);
     }
   };
 
@@ -436,14 +446,70 @@ export default function Home() {
 
       if (response?.ok) {
         setPlatformStatus(item.id, platform, "published");
+        logPublish(item, platform, "published");
       } else {
+        const err = response?.error || `Could not publish to ${platform}.`;
         setPlatformStatus(item.id, platform, "draft");
+        logPublish(item, platform, "failed", err);
       }
       // Small delay between sequential publishes to avoid tab spam.
       await new Promise((r) => setTimeout(r, 500));
     }
 
     track(`bulk_publish_${platform}_done`, { count: targets.length });
+    setSelectedIds(new Set());
+  };
+
+  const logPublish = (item, platform, status, error = "") => {
+    setPublishLog((prev) => [
+      {
+        id: `${item.id}-${platform}-${Date.now()}`,
+        listingId: item.id,
+        title: item.title || "Untitled",
+        platform,
+        status,
+        error,
+        ts: Date.now(),
+      },
+      ...prev.slice(0, 49),
+    ]);
+  };
+
+  const clearPublishLog = () => setPublishLog([]);
+
+  const publishedPlatforms = (item) =>
+    Object.entries(item.platforms || {}).filter(
+      ([, p]) => p.status === "published"
+    );
+
+  const markAsSold = (item) => {
+    const platforms = publishedPlatforms(item);
+    if (platforms.length === 0) return;
+
+    platforms.forEach(([platform, p]) => {
+      const url = p.url || platformDefaultUrl(platform);
+      setPlatformStatus(item.id, platform, "sold", p.url);
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    });
+
+    track("mark_as_sold", {
+      platforms: platforms.map(([p]) => p).join(","),
+      hasUrls: platforms.filter(([, p]) => p.url).length,
+    });
+  };
+
+  const platformDefaultUrl = (platform) => {
+    if (platform === "grailed") return "https://www.grailed.com/sell";
+    if (platform === "depop") return "https://www.depop.com/"; // best generic fallback
+    return "";
+  };
+
+  const bulkMarkAsSold = () => {
+    const targets = inventory.filter((item) => selectedIds.has(item.id));
+    if (targets.length === 0) return;
+    targets.forEach(markAsSold);
     setSelectedIds(new Set());
   };
 
@@ -499,6 +565,32 @@ export default function Home() {
       )}
 
       {error && <div className={styles.error}>{error}</div>}
+
+      {publishLog.length > 0 && (
+        <section className={styles.card}>
+          <div className={styles.publishLogHeader}>
+            <h2>Publish log</h2>
+            <button className={styles.secondary} onClick={clearPublishLog}>Clear</button>
+          </div>
+          <ul className={styles.publishLog}>
+            {publishLog.map((entry) => (
+              <li
+                key={entry.id}
+                className={
+                  entry.status === "failed" ? styles.publishError : styles.publishSuccess
+                }
+              >
+                <strong>{entry.title}</strong>
+                {" — "}
+                {entry.platform} {entry.status === "published" ? "published" : "failed"}
+                {entry.error && (
+                  <span className={styles.publishErrorMsg}>: {entry.error}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {extStatus === "missing" && (
         <section className={`${styles.card} ${styles.ctaCard}`}>
@@ -558,6 +650,18 @@ export default function Home() {
                       Publish {selectedIds.size > 0 && `(${selectedIds.size})`} to Depop
                     </button>
                     <button
+                      className={styles.secondary}
+                      disabled={
+                        selectedIds.size === 0 ||
+                        !inventory.some(
+                          (item) => selectedIds.has(item.id) && publishedPlatforms(item).length > 0
+                        )
+                      }
+                      onClick={bulkMarkAsSold}
+                    >
+                      Mark sold {selectedIds.size > 0 && `(${selectedIds.size})`}
+                    </button>
+                    <button
                       className={styles.danger}
                       disabled={selectedIds.size === 0}
                       onClick={bulkDelete}
@@ -605,6 +709,11 @@ export default function Home() {
                       </div>
                       <div className={styles.inventoryActions}>
                         <button className={styles.secondary} onClick={() => loadIntoForm(item)}>Edit / Publish</button>
+                        {publishedPlatforms(item).length > 0 && (
+                          <button className={styles.secondary} onClick={() => markAsSold(item)}>
+                            Mark sold
+                          </button>
+                        )}
                         <button className={styles.danger} onClick={() => deleteListing(item.id)}>Delete</button>
                       </div>
                     </div>
