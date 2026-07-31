@@ -25,11 +25,12 @@ Repo: `cwarre33/second-skin`
 5. **Never commit `.env`** — verify `git check-ignore -v .env` during preflight.
 6. **Stretch gate** — do not start stretch issues until every must-ship issue in the brief is Done on the board.
 7. **Honest Done** — do not mark Done for stubs unless the issue explicitly allows a stub.
+8. **Done requires `master`** — set Status = Done **only after** the work is committed **and** that commit is merged to `master` (not left on a `feat/*` branch). Branch → implement → test/build → merge to `master` → verify gates pass → then Done. If you cannot merge yet, keep Status = In Progress.
 
 ## Per-issue cycle
 
 ```text
-pick next → In Progress → read AC → implement → verify → commit → Done + comment → next
+pick next → In Progress → read AC → implement → verify → commit → merge to master → re-verify → Done + comment → next
 ```
 
 ### Step detail
@@ -63,13 +64,16 @@ pick next → In Progress → read AC → implement → verify → commit → Do
    ```
    Do not include `.env`. Prefer one focused commit per issue when practical.
 
-7. **Set Done + comment**  
+7. **Merge to `master`**  
+   If work is on a `feat/*` branch, merge it to `master` (fast-forward or `--no-ff`) and verify the commit lands on `master`. Re-run test/build gates on `master`. **Do not mark Done until this is true** (see Hard rule 8).
+
+8. **Set Done + comment**  
    ```bash
    gh project item-edit --id <ITEM_ID> --project-id PVT_kwHOChtZ-s4Beuq9 --field-id PVTSSF_lAHOChtZ-s4Beuq9zhZGtL4 --single-select-option-id 98236657
    gh issue comment <N> --repo cwarre33/second-skin --body "<what shipped + how to verify>"
    ```
 
-8. **Next**  
+9. **Next**  
    Repeat until must-ship is clear, then enter stretch (if any), then EOD.
 
 ## Board recipes
