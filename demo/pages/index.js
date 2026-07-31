@@ -43,6 +43,9 @@ const SAMPLE_LISTING = {
   price: "85",
   measurements: "Pit to pit: 22in, Length: 28in, Shoulder: 19in",
   condition: "good",
+  category: "Tops",
+  brand: "Nine Inch Nails",
+  size: "XL",
   flaws: [{ location: "print", description: "slight fading" }],
   optimizeFor: "grailed",
 };
@@ -67,6 +70,9 @@ export default function Home() {
   const [measurementCategory, setMeasurementCategory] = useState("");
   const [measurementValues, setMeasurementValues] = useState({});
   const [condition, setCondition] = useState("");
+  const [category, setCategory] = useState("");
+  const [brand, setBrand] = useState("");
+  const [size, setSize] = useState("");
   const [flaws, setFlaws] = useState([]);
   const [targetNet, setTargetNet] = useState("");
   const [optimizeFor, setOptimizeFor] = useState("grailed");
@@ -89,6 +95,9 @@ export default function Home() {
     if (saved.price !== undefined) setPrice(saved.price);
     if (saved.measurements !== undefined) setMeasurements(saved.measurements);
     if (saved.condition !== undefined) setCondition(saved.condition);
+    if (saved.category !== undefined) setCategory(saved.category);
+    if (saved.brand !== undefined) setBrand(saved.brand);
+    if (saved.size !== undefined) setSize(saved.size);
     if (saved.flaws !== undefined) setFlaws(saved.flaws);
     if (saved.targetNet !== undefined) setTargetNet(saved.targetNet);
     if (saved.optimizeFor !== undefined) setOptimizeFor(saved.optimizeFor);
@@ -107,12 +116,15 @@ export default function Home() {
       price,
       measurements,
       condition,
+      category,
+      brand,
+      size,
       flaws,
       targetNet,
       optimizeFor,
       images,
     }),
-    [url, title, description, tags, price, measurements, condition, flaws, targetNet, optimizeFor, images]
+    [url, title, description, tags, price, measurements, condition, category, brand, size, flaws, targetNet, optimizeFor, images]
   );
 
   const draftApi = useMemo(
@@ -125,13 +137,16 @@ export default function Home() {
         price.trim() ||
         measurements.trim() ||
         condition ||
+        category ||
+        brand ||
+        size ||
         flaws.length > 0 ||
         url.trim() ||
         optimizeFor !== "grailed" ||
         images.length > 0,
       restore: restoreDraft,
     }),
-    [draftSnapshot, title, description, tags, price, measurements, condition, flaws, url, optimizeFor, images, restoreDraft]
+    [draftSnapshot, title, description, tags, price, measurements, condition, category, brand, size, flaws, url, optimizeFor, images, restoreDraft]
   );
 
   const { clear: clearDraft } = useDraftAutosave(draftApi);
@@ -195,6 +210,9 @@ export default function Home() {
     setImages([]);
     setMeasurements("");
     setCondition("");
+    setCategory("");
+    setBrand("");
+    setSize("");
     setFlaws([]);
     setTargetNet("");
     setOptimizeFor("grailed");
@@ -218,6 +236,9 @@ export default function Home() {
     setPrice(SAMPLE_LISTING.price);
     setMeasurements(SAMPLE_LISTING.measurements);
     setCondition(SAMPLE_LISTING.condition);
+    setCategory(SAMPLE_LISTING.category);
+    setBrand(SAMPLE_LISTING.brand);
+    setSize(SAMPLE_LISTING.size);
     setFlaws(SAMPLE_LISTING.flaws);
     setOptimizeFor(SAMPLE_LISTING.optimizeFor);
     setView("form");
@@ -234,6 +255,9 @@ export default function Home() {
     setImages(listing.images || []);
     setMeasurements(listing.measurements || "");
     setCondition(listing.condition || "");
+    setCategory(listing.category || "");
+    setBrand(listing.brand || "");
+    setSize(listing.size || "");
     setFlaws(listing.flaws || []);
     setResult(null);
     setError("");
@@ -257,6 +281,9 @@ export default function Home() {
       price,
       measurements,
       condition,
+      category,
+      brand,
+      size,
       flaws,
       images,
     };
@@ -460,6 +487,13 @@ export default function Home() {
       .filter(Boolean),
     price,
     images,
+    // Raw structured fields for Depop autofill (#49). Condition is also folded
+    // into the description above; these let the extension map to Depop's
+    // category/brand/size/condition controls directly.
+    category,
+    brand,
+    size,
+    condition,
   });
 
   const handleImageUpload = (e) => {
@@ -566,6 +600,10 @@ export default function Home() {
         tags: item.tags || [],
         price: item.price,
         images: item.images || [],
+        category: item.category || "",
+        brand: item.brand || "",
+        size: item.size || "",
+        condition: item.condition || "",
       };
 
       const response =
@@ -984,6 +1022,37 @@ export default function Home() {
                   </div>
                 </>
               )}
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="category">Category (optional)</label>
+              <input
+                id="category"
+                type="text"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="Tops, Bottoms, Outerwear…"
+              />
+              <p className={styles.hint}>Maps to Depop's category/size selectors on publish (#49).</p>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="brand">Brand (optional)</label>
+              <input
+                id="brand"
+                type="text"
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                placeholder="e.g. Levi's"
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="size">Size (optional)</label>
+              <input
+                id="size"
+                type="text"
+                value={size}
+                onChange={(e) => setSize(e.target.value)}
+                placeholder="e.g. M, XL, 32"
+              />
             </div>
             <div className={styles.field}>
               <label htmlFor="condition">Condition (optional)</label>

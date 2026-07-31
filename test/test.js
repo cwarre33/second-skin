@@ -263,6 +263,35 @@ test("fillAutocomplete returns false when input is null", async () => {
 // Fee / payout calculator tests.
 const FEES = require("../demo/lib/fees.js");
 
+// Inventory tests (#49 structured fields).
+const INVENTORY = require("../demo/lib/inventory.js");
+
+test("createListing carries structured fields category/brand/size (#49)", () => {
+  const listing = INVENTORY.createListing({
+    title: "Vintage tee",
+    category: "Tops",
+    brand: "Levi's",
+    size: "M",
+    condition: "good",
+  });
+  assert.strictEqual(listing.title, "Vintage tee");
+  assert.strictEqual(listing.category, "Tops");
+  assert.strictEqual(listing.brand, "Levi's");
+  assert.strictEqual(listing.size, "M");
+  assert.strictEqual(listing.condition, "good");
+  assert.ok(listing.id, "should generate an id");
+  assert.strictEqual(listing.platforms.depop.status, "draft");
+  assert.strictEqual(listing.platforms.grailed.status, "draft");
+});
+
+test("createListing defaults structured fields to empty strings", () => {
+  const listing = INVENTORY.createListing({ title: "No fields" });
+  assert.strictEqual(listing.category, "");
+  assert.strictEqual(listing.brand, "");
+  assert.strictEqual(listing.size, "");
+  assert.strictEqual(listing.condition, "");
+});
+
 test("calculatePayouts returns null for empty price", () => {
   assert.strictEqual(FEES.calculatePayouts(""), null);
   assert.strictEqual(FEES.calculatePayouts("abc"), null);

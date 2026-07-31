@@ -47,6 +47,12 @@ async function processDepopForm(item, options = {}) {
     }
   }
 
+  // Structured fields (#49): map category/brand/size/condition from the draft
+  // into Depop's create form via chained selectors. No-harm — each field is
+  // skipped silently if its control isn't found, so this never blocks the basic
+  // description/price fill above.
+  await fillDepopStructuredFields(item);
+
   if (item.id) {
     await SECOND_SKIN.updatePlatformMeta(item.id, "depop", "active");
   }
@@ -54,6 +60,135 @@ async function processDepopForm(item, options = {}) {
   console.log("[Second Skin] Depop form ready for review:", item.id || "demo");
   if (imagesInjected) console.log("[Second Skin] Depop images injected for", item.id);
   console.log("[Second Skin] Listing stopped before publish — review and submit manually.");
+}
+
+// --- Depop structured-field autofill (#49) ---
+
+// Map our condition vocabulary to Depop's condition labels. Depop's web create
+// form uses human-readable condition names; match by substring so minor label
+// drift ("New with tags" vs "New with tags (NWT)") still resolves.
+const DEPOP_CONDITION_MAP = {
+  new: "New with tags",
+  like_new: "New without tags",
+  good: "Good",
+  fair: "Fair",
+  distressed: "Poor",
+};
+
+async function fillDepopStructuredFields(item) {
+  if (!item) return;
+
+  if (item.category) {
+    const ok = await selectDepopDropdown("Category", item.category);
+    if (ok) {
+      console.log("[Second Skin] Depop category set to", item.category);
+      await SECOND_SKIN.humanDelay(400, 600);
+    }
+  }
+  if (item.brand) {
+    const ok = await fillDepopBrand(item.brand);
+    if (ok) console.log("[Second Skin] Depop brand set to", item.brand);
+  }
+  if (item.size) {
+    const ok = await selectDepopDropdown("Size", item.size);
+    if (ok) console.log("[Second Skin] Depop size set to", item.size);
+  }
+  if (item.condition) {
+    const label = DEPOP_CONDITION_MAP[item.condition] || item.condition;
+    const ok = await selectDepopDropdown("Condition", label);
+    if (ok) console.log("[Second Skin] Depop condition set to", label);
+  }
+}
+
+// Open a Depop dropdown trigger (Radix or native <select>) and pick the option
+// whose text matches `optionText`. Returns false (no-harm) if the control or
+// option isn't found, so a missing field never aborts the rest of the fill.
+async function selectDepopDropdown(triggerText, optionText) {
+  if (!triggerText || !optionText) return false;
+
+  // Native <select> first — Depop still uses some plain selects.
+  const native = findNativeSelectByLabel(triggerText);
+  if (native) {
+    const opt = Array.from(native.options).find((o) =>
+      o.text.toLowerCase().includes(optionText.toLowerCase())
+    );
+    if (opt) {
+      native.value = opt.value;
+      native.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+  }
+
+  // Radix-style trigger + menu.
+  const trigger = await findDepopTriggerByText(triggerText);
+  if (!trigger) return false;
+  const specific = await SECOND_SKIN.selectRadixOption(trigger, optionText);
+  if (specific) return true;
+
+  // Fallback: open and click the first available option (better than nothing).
+  trigger.click();
+  await SECOND_SKIN.humanDelay(300, 400);
+  const firstOption = await SECOND_SKIN.waitFor(
+    '[role="option"]:first-child, [role="menuitem"]:first-child, [data-testid*="option"]:first-child',
+    2000
+  );
+  if (firstOption) {
+    firstOption.click();
+    await SECOND_SKIN.humanDelay(200, 300);
+    return true;
+  }
+  return false;
+}
+
+async function fillDepopBrand(brand) {
+  const input = await SECOND_SKIN.waitForEnabled(
+    'input[name="brand" i], input[id*="brand" i], input[placeholder*="brand" i], input[aria-label*="brand" i]',
+    4000
+  );
+  if (!input) return false;
+  return SECOND_SKIN.fillAutocomplete(input, brand);
+}
+
+function findNativeSelectByLabel(labelText) {
+  const lower = labelText.toLowerCase();
+  // A <select> whose <label for=...> matches.
+  for (const sel of document.querySelectorAll("select")) {
+    if (sel.id) {
+      const lab = document.querySelector(`label[for="${CSS.escape(sel.id)}"]`);
+      if (lab && (lab.textContent || "").toLowerCase().includes(lower)) return sel;
+    }
+  }
+  // A <select> inside a labeled field container.
+  for (const lab of document.querySelectorAll("label")) {
+    if ((lab.textContent || "").toLowerCase().includes(lower)) {
+      const container = lab.closest('label, [class*="field" i], [class*="group" i]') || lab.parentElement;
+      if (container) {
+        const sel = container.querySelector("select");
+        if (sel) return sel;
+      }
+    }
+  }
+  return null;
+}
+
+async function findDepopTriggerByText(text) {
+  const selectors = ["button", '[role="combobox"]', '[role="button"]', '[data-state="closed"]'];
+  const deadline = Date.now() + 3000;
+  const lower = text.toLowerCase();
+  while (Date.now() < deadline) {
+    for (const sel of selectors) {
+      for (const el of document.querySelectorAll(sel)) {
+        const visible = !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+        if (!visible) continue;
+        const t = (el.textContent || "").toLowerCase();
+        const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+        const placeholder = (el.getAttribute("placeholder") || "").toLowerCase();
+        if (t.includes(lower) || aria.includes(lower) || placeholder.includes(lower)) return el;
+      }
+    }
+    await SECOND_SKIN.humanDelay(300, 300);
+  }
+  return null;
 }
 
 // --- Passive profile scraper (sold-state detection) ---

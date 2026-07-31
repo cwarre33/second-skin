@@ -31,6 +31,9 @@ export function createListing(draft = {}) {
     price: draft.price || "",
     measurements: draft.measurements || "",
     condition: draft.condition || "",
+    category: draft.category || "",
+    brand: draft.brand || "",
+    size: draft.size || "",
     flaws: draft.flaws || [],
     images: draft.images || [],
     url: draft.url || "",
@@ -92,4 +95,15 @@ export function formatCondition(condition, flaws = []) {
 
 function generateId() {
   return `ss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    loadInventory,
+    saveInventory,
+    createListing,
+    updateListingStatus,
+    CONDITION_OPTIONS,
+    formatCondition,
+  };
 }
