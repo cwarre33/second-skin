@@ -5,7 +5,7 @@
  * NVIDIA_API_KEY is server-side only (issue #8).
  *
  * Body: { platform, title, description, tags? }
- * Response: { title, description, tags }
+ * Response: { title, description, tags, platform }
  */
 
 const NIM_URL =
@@ -24,6 +24,27 @@ const rateBuckets = new Map();
 // serving stale listings for long. Production scaling → Redis / persistent cache.
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const responseCache = new Map();
+
+const PLATFORM_PROMPTS = {
+  depop: {
+    name: "Depop",
+    titleRules: "- title: under 40 characters, trendy/casual, include era or vibe if known.",
+    descriptionRules: "- description: 1-2 short sentences, mention fit, fabric, and condition. Keep it casual and scroll-stopping.",
+    tagRules: "- tags: exactly 5 lowercase single-word tags, no hashtags. Include brand, item type, and 2 style tags.",
+  },
+  grailed: {
+    name: "Grailed",
+    titleRules: "- title: under 60 characters, specific, includes brand/era/color/size if known.",
+    descriptionRules: "- description: 2-4 sentences, mention fit, fabric, condition, and style. Use menswear/spec-head language.",
+    tagRules: "- tags: 5-10 relevant lowercase tags, no hashtags. Include brand, era, silhouette, material.",
+  },
+  poshmark: {
+    name: "Poshmark",
+    titleRules: "- title: under 80 characters, front-load keywords (brand + item + style).",
+    descriptionRules: "- description: 3-5 friendly sentences. Mention condition, fit, and invite offers/bundles.",
+    tagRules: "- tags: 3 hashtags at the end of the description (e.g. #nike #athleisure #poshmark). Return them as the tags array.",
+  },
+};
 
 function hashRequest(payload) {
   const normalized = [
@@ -111,16 +132,17 @@ export default async function handler(req, res) {
 
 async function improveWithNim({ platform, title, description, tags, price }) {
   const existingTags = Array.isArray(tags) ? tags.join(", ") : String(tags || "");
+  const rules = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.grailed;
 
   const prompt = [
-    `You are a fashion resale expert optimizing a listing for ${platform}.`,
+    `You are a fashion resale expert optimizing a listing for ${rules.name}.`,
     "Given the draft below, return an improved listing as a single JSON object:",
     '{"title":"...","description":"...","tags":["...","..."]}',
     "",
     "Rules:",
-    "- title: under 60 characters, specific, includes brand/era/color/size if known.",
-    "- description: 2-4 sentences, mention fit, fabric, condition, and style.",
-    "- tags: 5-10 relevant lowercase tags. No hashtags.",
+    rules.titleRules,
+    rules.descriptionRules,
+    rules.tagRules,
     price ? "- price context (do NOT return price): " + price : "",
     "- Return ONLY the JSON object, no markdown, no explanation.",
     "",

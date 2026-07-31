@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { improveListing } from "@/lib/api";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { useExtension } from "@/hooks/useExtension";
+import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import {
   createListing,
   loadInventory,
@@ -34,6 +35,7 @@ export default function Home() {
   const [draggingIdx, setDraggingIdx] = useState(null);
   const [measurements, setMeasurements] = useState("");
   const [targetNet, setTargetNet] = useState("");
+  const [optimizeFor, setOptimizeFor] = useState("grailed");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -42,6 +44,56 @@ export default function Home() {
 
   const { track } = useAnalytics();
   const { status: extStatus, lastError: extError, retry: retryExtension, parseDepop, autofillGrailed, publishDepop } = useExtension();
+
+  // Autosave restoration happens once on mount.
+  const restoreDraft = useCallback((saved) => {
+    if (saved.url !== undefined) setUrl(saved.url);
+    if (saved.title !== undefined) setTitle(saved.title);
+    if (saved.description !== undefined) setDescription(saved.description);
+    if (saved.tags !== undefined) setTags(saved.tags);
+    if (saved.price !== undefined) setPrice(saved.price);
+    if (saved.measurements !== undefined) setMeasurements(saved.measurements);
+    if (saved.targetNet !== undefined) setTargetNet(saved.targetNet);
+    if (saved.optimizeFor !== undefined) setOptimizeFor(saved.optimizeFor);
+    if (saved.images && saved.images.length > 0) setImages(saved.images);
+    if (saved.title?.trim() || saved.description?.trim()) {
+      setView("form");
+    }
+  }, []);
+
+  const draftSnapshot = useMemo(
+    () => ({
+      url,
+      title,
+      description,
+      tags,
+      price,
+      measurements,
+      targetNet,
+      optimizeFor,
+      images,
+    }),
+    [url, title, description, tags, price, measurements, targetNet, optimizeFor, images]
+  );
+
+  const draftApi = useMemo(
+    () => ({
+      snapshot: () => draftSnapshot,
+      hasContent: () =>
+        title.trim() ||
+        description.trim() ||
+        tags.trim() ||
+        price.trim() ||
+        measurements.trim() ||
+        url.trim() ||
+        optimizeFor !== "grailed" ||
+        images.length > 0,
+      restore: restoreDraft,
+    }),
+    [draftSnapshot, title, description, tags, price, measurements, url, optimizeFor, images, restoreDraft]
+  );
+
+  const { clear: clearDraft } = useDraftAutosave(draftApi);
 
   // Load inventory on mount.
   useEffect(() => {
@@ -95,9 +147,11 @@ export default function Home() {
     setImages([]);
     setMeasurements("");
     setTargetNet("");
+    setOptimizeFor("grailed");
     setResult(null);
     setError("");
     setPublished(null);
+    clearDraft();
   };
 
   const startNew = () => {
@@ -182,7 +236,7 @@ export default function Home() {
 
     try {
       const payload = {
-        platform: "grailed",
+        platform: optimizeFor,
         title,
         description,
         tags,
@@ -696,6 +750,19 @@ export default function Home() {
               )}
             </div>
             <div className={styles.actions}>
+              <div className={styles.platformSelect}>
+                <label htmlFor="optimizeFor">Optimize for</label>
+                <select
+                  id="optimizeFor"
+                  value={optimizeFor}
+                  onChange={(e) => setOptimizeFor(e.target.value)}
+                  disabled={loading}
+                >
+                  <option value="grailed">Grailed</option>
+                  <option value="depop">Depop</option>
+                  <option value="poshmark">Poshmark</option>
+                </select>
+              </div>
               <button
                 className={styles.primary}
                 onClick={handleImprove}

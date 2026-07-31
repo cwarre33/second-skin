@@ -94,3 +94,31 @@ button.feeCard:hover {
   border-radius: 0.375rem;
   font-size: 0.9rem;
 }
+
+/* Platform selector for AI improve (issue #46) */
+
+.platformSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.platformSelect label {
+  font-weight: 500;
+  color: #555;
+}
+
+.platformSelect select {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid #d4d4d4;
+  border-radius: 0.375rem;
+  background: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.platformSelect select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
