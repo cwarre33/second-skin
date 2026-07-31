@@ -336,6 +336,29 @@ test("applyTemplate calls setters with stored values", () => {
   assert.strictEqual(calls.setOptimizeFor, "depop");
 });
 
+// Measurement template tests.
+const MEASUREMENTS = require("../demo/lib/measurements.js");
+
+test("formatMeasurements returns empty for empty values", () => {
+  assert.strictEqual(MEASUREMENTS.formatMeasurements("top", {}), "");
+});
+
+test("formatMeasurements formats top fields", () => {
+  const out = MEASUREMENTS.formatMeasurements("top", {
+    pit_to_pit: "22in",
+    length: "28in",
+    shoulder: "19in",
+  });
+  assert.strictEqual(
+    out,
+    "Pit to pit: 22in, Length: 28in, Shoulder: 19in"
+  );
+});
+
+test("drawMeasurementOverlay returns null outside browser", () => {
+  assert.strictEqual(MEASUREMENTS.drawMeasurementOverlay("top", { pit_to_pit: "22in" }), null);
+});
+
 // Ollama listing parser tests (no network).
 const OLLAMA = require("../ollama.js");
 

@@ -18,6 +18,11 @@ import {
   loadTemplates,
   saveTemplates,
 } from "@/lib/templates";
+import {
+  drawMeasurementOverlay,
+  formatMeasurements,
+  MEASUREMENT_CATEGORIES,
+} from "@/lib/measurements";
 import styles from "@/styles/Home.module.css";
 
 const STATUS_LABEL = {
@@ -57,6 +62,8 @@ export default function Home() {
   const [images, setImages] = useState([]);
   const [draggingIdx, setDraggingIdx] = useState(null);
   const [measurements, setMeasurements] = useState("");
+  const [measurementCategory, setMeasurementCategory] = useState("");
+  const [measurementValues, setMeasurementValues] = useState({});
   const [condition, setCondition] = useState("");
   const [flaws, setFlaws] = useState([]);
   const [targetNet, setTargetNet] = useState("");
@@ -494,6 +501,26 @@ export default function Home() {
       next.splice(to, 0, moved);
       return next;
     });
+  };
+
+  const updateMeasurementValue = (key, value) => {
+    setMeasurementValues((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const insertMeasurementTemplate = () => {
+    const formatted = formatMeasurements(measurementCategory, measurementValues);
+    if (!formatted) return;
+    setMeasurements((prev) => {
+      const base = prev.trim();
+      return base ? `${base}\n${formatted}` : formatted;
+    });
+  };
+
+  const generateMeasurementOverlay = () => {
+    const dataUrl = drawMeasurementOverlay(measurementCategory, measurementValues);
+    if (!dataUrl) return;
+    setImages((prev) => [...prev, dataUrl]);
+    track("measurement_overlay_generated", { category: measurementCategory });
   };
 
   const toggleSelect = (id) => {
@@ -946,6 +973,56 @@ export default function Home() {
                 onChange={(e) => setMeasurements(e.target.value)}
                 placeholder="Pit to pit: 24in, Length: 29in, Shoulder: 19in..."
               />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="measurementCategory">Measurement template (optional)</label>
+              <select
+                id="measurementCategory"
+                value={measurementCategory}
+                onChange={(e) => {
+                  setMeasurementCategory(e.target.value);
+                  setMeasurementValues({});
+                }}
+              >
+                <option value="">— Select category —</option>
+                {Object.entries(MEASUREMENT_CATEGORIES).map(([key, cfg]) => (
+                  <option key={key} value={key}>{cfg.label}</option>
+                ))}
+              </select>
+              {measurementCategory && (
+                <>
+                  <div className={styles.measurementFields}>
+                    {MEASUREMENT_CATEGORIES[measurementCategory].fields.map((field) => (
+                      <div key={field.key} className={styles.measurementField}>
+                        <label htmlFor={`ms-${field.key}`}>{field.label}</label>
+                        <input
+                          id={`ms-${field.key}`}
+                          type="text"
+                          placeholder="in / cm"
+                          value={measurementValues[field.key] || ""}
+                          onChange={(e) => updateMeasurementValue(field.key, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.secondary}
+                      onClick={insertMeasurementTemplate}
+                      type="button"
+                    >
+                      Insert into measurements
+                    </button>
+                    <button
+                      className={styles.secondary}
+                      onClick={generateMeasurementOverlay}
+                      type="button"
+                    >
+                      Generate overlay image
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
             <div className={styles.field}>
               <label htmlFor="condition">Condition (optional)</label>

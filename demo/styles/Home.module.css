@@ -331,3 +331,31 @@ button.feeCard:hover {
   font-size: 0.85rem;
   color: #475569;
 }
+
+/* Category-aware measurement templates (issue #43) */
+
+.measurementFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.measurementField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.measurementField label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.measurementField input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d4d4d4;
+  border-radius: 0.375rem;
+  font-size: 0.9rem;
+}
