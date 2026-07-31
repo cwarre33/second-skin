@@ -8,6 +8,7 @@ import {
   saveInventory,
   updateListingStatus,
 } from "@/lib/inventory";
+import { calculatePayouts, suggestListPrice, FEE_CONFIG } from "@/lib/fees";
 import styles from "@/styles/Home.module.css";
 
 const STATUS_LABEL = {
@@ -32,6 +33,7 @@ export default function Home() {
   const [images, setImages] = useState([]);
   const [draggingIdx, setDraggingIdx] = useState(null);
   const [measurements, setMeasurements] = useState("");
+  const [targetNet, setTargetNet] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -92,6 +94,7 @@ export default function Home() {
     setPrice("");
     setImages([]);
     setMeasurements("");
+    setTargetNet("");
     setResult(null);
     setError("");
     setPublished(null);
@@ -634,6 +637,9 @@ export default function Home() {
                 placeholder="120"
               />
               <p className={styles.hint}>Used when improving for market-specific pricing.</p>
+              {price.trim() && (
+                <FeePanel price={price} targetNet={targetNet} setTargetNet={setTargetNet} setPrice={setPrice} />
+              )}
             </div>
             <div className={styles.field}>
               <label htmlFor="measurements">Measurements (optional)</label>
@@ -801,6 +807,74 @@ export default function Home() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function FeePanel({ price, targetNet, setTargetNet, setPrice }) {
+  const payouts = calculatePayouts(price);
+  if (!payouts) return null;
+
+  return (
+    <div className={styles.feePanel}>
+      <h4>Estimated payout by platform</h4>
+      <div className={styles.feeGrid}>
+        {Object.keys(FEE_CONFIG).map((key) => {
+          const cfg = FEE_CONFIG[key];
+          const p = payouts[key];
+          return (
+            <div key={key} className={styles.feeCard} style={{ borderColor: cfg.color }}>
+              <div className={styles.feeName}>{cfg.name}</div>
+              <div className={styles.feeNet}>${p.net.toFixed(2)}</div>
+              <div className={styles.feeMeta}>
+                ${p.total.toFixed(2)} fees ({p.effective.toFixed(1)}%)
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className={styles.reverseCalc}>
+        <label htmlFor="targetNet">I want to net</label>
+        <div className={styles.reverseRow}>
+          <span className={styles.currency}>$</span>
+          <input
+            id="targetNet"
+            type="text"
+            value={targetNet}
+            onChange={(e) => setTargetNet(e.target.value)}
+            placeholder="100"
+          />
+        </div>
+        {(() => {
+          if (!targetNet.trim()) return null;
+          const suggestions = Object.keys(FEE_CONFIG)
+            .map((key) => ({ key, ...suggestListPrice(targetNet, key) }))
+            .filter((s) => s.listPrice);
+          if (suggestions.length === 0) return null;
+          return (
+            <div className={styles.feeGrid}>
+              {suggestions.map((s) => {
+                const cfg = FEE_CONFIG[s.key];
+                return (
+                  <button
+                    key={s.key}
+                    className={styles.feeCard}
+                    style={{ borderColor: cfg.color }}
+                    onClick={() => setPrice(String(s.listPrice))}
+                    type="button"
+                  >
+                    <div className={styles.feeName}>{cfg.name}</div>
+                    <div className={styles.feeNet}>${s.listPrice.toFixed(2)}</div>
+                    <div className={styles.feeMeta}>List price to net ${s.targetNet.toFixed(2)}</div>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
+      <p className={styles.hint}>Fees are approximate. Verify current rates before listing.</p>
     </div>
   );
 }

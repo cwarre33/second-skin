@@ -260,6 +260,38 @@ test("fillAutocomplete returns false when input is null", async () => {
   assert.strictEqual(result, false);
 });
 
+// Fee / payout calculator tests.
+const FEES = require("../demo/lib/fees.js");
+
+test("calculatePayouts returns null for empty price", () => {
+  assert.strictEqual(FEES.calculatePayouts(""), null);
+  assert.strictEqual(FEES.calculatePayouts("abc"), null);
+});
+
+test("calculatePayouts computes Depop, Grailed, and Poshmark nets", () => {
+  const out = FEES.calculatePayouts("100");
+  assert.ok(out, "should return payouts");
+  assert.strictEqual(out.price, 100);
+  assert.strictEqual(typeof out.depop.net, "number");
+  assert.strictEqual(typeof out.grailed.net, "number");
+  assert.strictEqual(typeof out.poshmark.net, "number");
+  assert.ok(out.depop.net < 100, "Depop net should be less than list price");
+  assert.ok(out.grailed.net < 100, "Grailed net should be less than list price");
+  assert.ok(out.poshmark.net < 100, "Poshmark net should be less than list price");
+});
+
+test("suggestListPrice inverts Grailed fee schedule", () => {
+  const suggestion = FEES.suggestListPrice("80", "grailed");
+  assert.ok(suggestion, "should return a suggestion");
+  assert.ok(suggestion.listPrice >= 80, "list price should cover target net");
+  assert.ok(suggestion.payout.net >= 80, "resulting net should meet target");
+});
+
+test("suggestListPrice returns null for invalid target", () => {
+  assert.strictEqual(FEES.suggestListPrice("", "grailed"), null);
+  assert.strictEqual(FEES.suggestListPrice("50", "unknown"), null);
+});
+
 // Ollama listing parser tests (no network).
 const OLLAMA = require("../ollama.js");
 
